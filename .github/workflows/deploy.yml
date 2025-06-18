@@ -1,0 +1,54 @@
+name: Deploy Telegram Bot to AWS Lambda
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          role-to-assume: ${{ secrets.AWS_IAM_ROLE_FOR_GITHUB_ACTIONS }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Set up AWS SAM CLI
+        uses: aws-actions/setup-sam@v2
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: SAM Build
+        run: sam build --use-container
+        # No need to pass secrets to sam build directly for this setup
+
+      - name: SAM Deploy
+        run: |
+          ECR_REPOSITORY_URI="${{ secrets.ECR_REPOSITORY_URI }}"
+
+          sam deploy \
+            --no-confirm-changeset \
+            --no-fail-on-empty-changeset \
+            --image-repository $ECR_REPOSITORY_URI \
+            --parameter-overrides \
+              ParameterKey=TelegramBotToken,ParameterValue='${{ secrets.TELEGRAM_BOT_TOKEN }}' \
+              ParameterKey=AuthorizedUserIds,ParameterValue='${{ secrets.AUTHORIZED_USER_IDS }}' \
+              ParameterKey=TargetChannelId,ParameterValue='${{ secrets.TARGET_CHANNEL_ID }}' \
+              ParameterKey=TelegramWebhookSecretToken,ParameterValue='${{ secrets.TELEGRAM_WEBHOOK_SECRET_TOKEN }}' \
+            --stack-name telegram-bot-stack
+        env:
+          AWS_DEFAULT_REGION: ${{ secrets.AWS_REGION }}
+          # Secrets here are for the execution environment of sam deploy, not direct pass-through to template unless used by some hook
+          # TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }} # Example, not strictly needed by sam deploy if only used by app code
