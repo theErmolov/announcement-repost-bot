@@ -20,7 +20,7 @@ jobs:
         uses: aws-actions/configure-aws-credentials@v2
         with:
           role-to-assume: ${{ secrets.AWS_IAM_ROLE_FOR_GITHUB_ACTIONS }}
-          aws-region: ${{ secrets.AWS_REGION }}
+          aws-region: ${{ vars.AWS_REGION }} # MODIFIED: from secrets.AWS_REGION
 
       - name: Set up AWS SAM CLI
         uses: aws-actions/setup-sam@v2
@@ -28,29 +28,21 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.9' # Should match Lambda runtime or be compatible
+          python-version: '3.9'
 
       - name: SAM Build
-        run: sam build # MODIFIED: Removed --use-container
-        # Environment variables here are generally not needed for 'sam build' for Zip packages
-        # unless build scripts within the project use them.
+        run: sam build
 
       - name: SAM Deploy
         run: |
-          # ECR_REPOSITORY_URI is no longer needed for sam deploy with PackageType: Zip
-          # Forcing a line break before sam deploy for clarity
           sam deploy \
             --no-confirm-changeset \
             --no-fail-on-empty-changeset \
-            # MODIFIED: Removed --image-repository parameter
             --parameter-overrides \
               ParameterKey=TelegramBotToken,ParameterValue='${{ secrets.TELEGRAM_BOT_TOKEN }}' \
-              ParameterKey=AuthorizedUserIds,ParameterValue='${{ secrets.AUTHORIZED_USER_IDS }}' \
-              ParameterKey=TargetChannelId,ParameterValue='${{ secrets.TARGET_CHANNEL_ID }}' \
+              ParameterKey=AuthorizedUserIds,ParameterValue='${{ vars.AUTHORIZED_USER_IDS }}' \
+              ParameterKey=TargetChannelId,ParameterValue='${{ vars.TARGET_CHANNEL_ID }}' \
               ParameterKey=TelegramWebhookSecretToken,ParameterValue='${{ secrets.TELEGRAM_WEBHOOK_SECRET_TOKEN }}' \
-            --stack-name telegram-bot-stack # Choose a stack name
-            # --capabilities CAPABILITY_IAM # Required if SAM creates IAM roles, good to have if unsure
-            # --region ${{ secrets.AWS_REGION }} # Usually picked up from configure-aws-credentials
+            --stack-name telegram-bot-stack
         env:
-          AWS_DEFAULT_REGION: ${{ secrets.AWS_REGION }} # Ensure AWS SDKs/CLI pick up the region
-          # TELEGRAM_BOT_TOKEN, etc., are primarily for parameter-overrides, not direct env use by sam deploy
+          AWS_DEFAULT_REGION: ${{ vars.AWS_REGION }} # MODIFIED: from secrets.AWS_REGION
