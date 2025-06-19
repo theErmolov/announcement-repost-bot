@@ -14,7 +14,7 @@ Parameters:
   TargetChannelId:
     Type: String
     Description: "The ID of the target Telegram channel for reposts (e.g., -100xxxxxxxxxx or @channelusername)"
-  TelegramWebhookSecretToken: # NEW Parameter
+  TelegramWebhookSecretToken:
     Type: String
     Description: "A secret token used to verify webhook requests from Telegram. Should be a long random string."
     NoEcho: true
@@ -36,23 +36,23 @@ Resources:
           TELEGRAM_BOT_TOKEN: !Ref TelegramBotToken
           AUTHORIZED_USER_IDS: !Ref AuthorizedUserIds
           TARGET_CHANNEL_ID: !Ref TargetChannelId
-          TELEGRAM_WEBHOOK_SECRET_TOKEN: !Ref TelegramWebhookSecretToken # NEW Env Var
+          TELEGRAM_WEBHOOK_SECRET_TOKEN: !Ref TelegramWebhookSecretToken
       Events:
         TelegramWebhook:
           Type: Api
           Properties:
-            Path: /webhook # MODIFIED Path - now static
+            Path: /webhook
             Method: post
-            RestApiId: !Serverless::Api
+            RestApiId: !Serverless::Api # Implicitly creates an API Gateway
     Metadata:
-      DockerTag: python3.9-v1
-      DockerContext: .
-      Dockerfile: Dockerfile
+      DockerTag: python3.9-v1 # A tag for your ECR image
+      DockerContext: . # Docker build context directory, relative to template.yaml
+      Dockerfile: Dockerfile # Dockerfile name
 
 Outputs:
   TelegramBotApiEndpoint:
     Description: "API Gateway endpoint URL for your Telegram Bot Webhook. Register this URL with Telegram and provide the Webhook Secret Token."
-    Value: !Sub "https://\${ServerlessRestApi}.execute-api.\${AWS::Region}.amazonaws.com/\${Serverless::Stage}/webhook" # MODIFIED to use ServerlessRestApi intrinsic function for ID
+    Value: !Sub "https://\${ServerlessRestApi}.execute-api.\${AWS::Region}.amazonaws.com/\${Serverless::Stage}/webhook" # CORRECTED LINE
   TelegramBotFunctionArn:
     Description: "Telegram Bot Lambda Function ARN"
     Value: !GetAtt TelegramBotFunction.Arn
