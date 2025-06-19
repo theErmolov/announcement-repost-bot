@@ -52,7 +52,7 @@ Resources:
 Outputs:
   TelegramBotApiEndpoint:
     Description: "API Gateway endpoint URL for your Telegram Bot Webhook. Register this URL with Telegram and provide the Webhook Secret Token."
-    Value: !Sub "https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/${Serverless::Stage}/webhook"
+    Value: !Sub "https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/webhook" # THIS IS THE INTENDED CORRECT SYNTAX
   TelegramBotFunctionArn:
     Description: "Telegram Bot Lambda Function ARN"
     Value: !GetAtt TelegramBotFunction.Arn
