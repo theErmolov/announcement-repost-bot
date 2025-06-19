@@ -1,7 +1,7 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
 Description: >
-  Telegram Bot Lambda function
+  Telegram Bot Lambda function (ZIP deployment)
 
 Parameters:
   TelegramBotToken:
@@ -22,15 +22,18 @@ Parameters:
 Globals:
   Function:
     Timeout: 30
-    MemorySize: 256
+    MemorySize: 256 # Can be adjusted based on needs
 
 Resources:
   TelegramBotFunction:
     Type: AWS::Serverless::Function
     Properties:
-      PackageType: Image
-      Architectures:
-        - x86_64
+      PackageType: Zip # MODIFIED
+      Handler: lambda_function.lambda_handler # MODIFIED (points to src/lambda_function.py, function lambda_handler)
+      Runtime: python3.9 # MODIFIED
+      CodeUri: src/ # MODIFIED (points to the directory containing the handler)
+      Architectures: # Can often be omitted for Zip, but good to specify if known
+        - x86_64 # or arm64 if preferred and supported by runtime
       Environment:
         Variables:
           TELEGRAM_BOT_TOKEN: !Ref TelegramBotToken
@@ -44,15 +47,12 @@ Resources:
             Path: /webhook
             Method: post
             RestApiId: !Serverless::Api # Implicitly creates an API Gateway
-    Metadata:
-      DockerTag: python3.9-v1 # A tag for your ECR image
-      DockerContext: . # Docker build context directory, relative to template.yaml
-      Dockerfile: Dockerfile # Dockerfile name
+    # REMOVED Metadata section that contained DockerTag, DockerContext, Dockerfile
 
 Outputs:
   TelegramBotApiEndpoint:
     Description: "API Gateway endpoint URL for your Telegram Bot Webhook. Register this URL with Telegram and provide the Webhook Secret Token."
-    Value: !Sub "https://\${ServerlessRestApi}.execute-api.\${AWS::Region}.amazonaws.com/\${Serverless::Stage}/webhook" # CORRECTED LINE
+    Value: !Sub "https://\${ServerlessRestApi}.execute-api.\${AWS::Region}.amazonaws.com/\${Serverless::Stage}/webhook"
   TelegramBotFunctionArn:
     Description: "Telegram Bot Lambda Function ARN"
     Value: !GetAtt TelegramBotFunction.Arn
