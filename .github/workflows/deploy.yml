@@ -20,7 +20,7 @@ jobs:
         uses: aws-actions/configure-aws-credentials@v2
         with:
           role-to-assume: ${{ secrets.AWS_IAM_ROLE_FOR_GITHUB_ACTIONS }}
-          aws-region: ${{ vars.AWS_REGION }} # MODIFIED: from secrets.AWS_REGION
+          aws-region: ${{ vars.AWS_REGION }}
 
       - name: Set up AWS SAM CLI
         uses: aws-actions/setup-sam@v2
@@ -38,6 +38,8 @@ jobs:
           sam deploy \
             --no-confirm-changeset \
             --no-fail-on-empty-changeset \
+            --s3-bucket ${{ vars.SAM_CLI_S3_BUCKET }} \
+            --s3-prefix telegram-bot-deployments \
             --parameter-overrides \
               ParameterKey=TelegramBotToken,ParameterValue='${{ secrets.TELEGRAM_BOT_TOKEN }}' \
               ParameterKey=AuthorizedUserIds,ParameterValue='${{ vars.AUTHORIZED_USER_IDS }}' \
@@ -45,4 +47,4 @@ jobs:
               ParameterKey=TelegramWebhookSecretToken,ParameterValue='${{ secrets.TELEGRAM_WEBHOOK_SECRET_TOKEN }}' \
             --stack-name telegram-bot-stack
         env:
-          AWS_DEFAULT_REGION: ${{ vars.AWS_REGION }} # MODIFIED: from secrets.AWS_REGION
+          AWS_DEFAULT_REGION: ${{ vars.AWS_REGION }}
