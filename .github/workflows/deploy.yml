@@ -40,6 +40,7 @@ jobs:
             --no-fail-on-empty-changeset \
             --s3-bucket ${{ vars.SAM_CLI_S3_BUCKET }} \
             --s3-prefix telegram-bot-deployments \
+            --capabilities CAPABILITY_IAM \
             --parameter-overrides \
               ParameterKey=TelegramBotToken,ParameterValue='${{ secrets.TELEGRAM_BOT_TOKEN }}' \
               ParameterKey=AuthorizedUserIds,ParameterValue='${{ vars.AUTHORIZED_USER_IDS }}' \
