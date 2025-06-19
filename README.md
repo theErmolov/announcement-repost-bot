@@ -71,6 +71,8 @@ Create an IAM role in your AWS account that GitHub Actions can assume.
 *   **GitHub organization/repository/username**: Specify your GitHub details to restrict which workflows can assume this role.
 *   **Permissions**: Attach policies that grant necessary permissions for SAM deployments. This includes permissions for CloudFormation, Lambda, API Gateway, IAM (to pass roles), and **S3 (PutObject, GetObject for the SAM deployment bucket)**. Apply the principle of least privilege.
 
+    *Note: The SAM template creates an IAM role for the Lambda function, which is why `CAPABILITY_IAM` is used during deployment.*
+
 Store the ARN of this role in the `AWS_IAM_ROLE_FOR_GITHUB_ACTIONS` GitHub secret.
 
 ### 6. Deployment via GitHub Actions
@@ -123,7 +125,7 @@ Your bot is now live!
     ```bash
     sam deploy --guided
     ```
-    This will prompt you for parameters, including the S3 bucket for deployment. For local testing, you can enter values directly.
+    (This will prompt you for parameters, including the S3 bucket for deployment. For local testing, you can enter values directly. Note: if the stack creates IAM resources, you might need to add `--capabilities CAPABILITY_IAM` if deploying manually without `--guided` which handles this.)
 6.  **Local Invocation (for `lambda_function.py`):**
     You can test the Lambda function locally using `sam local invoke`.
 
