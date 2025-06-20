@@ -1,5 +1,5 @@
 import json
-import asyncio
+import asyncio # This was already present, kept as is.
 import os
 import logging
 from telegram import Update, Bot
@@ -31,7 +31,7 @@ async def initialize_bot():
         logger.info("Bot application initialized and handlers registered.")
     return application
 
-async def lambda_handler(event, context):
+async def actual_async_logic(event, context): # Renamed from lambda_handler
     try:
         logger.info(f"Received event: {json.dumps(event)}")
 
@@ -73,3 +73,7 @@ async def lambda_handler(event, context):
     except Exception as e:
         logger.error(f"Error processing update: {e}", exc_info=True)
         return {'statusCode': 500, 'body': json.dumps({'message': f"Internal server error: {str(e)}"})}
+
+# New lambda_handler function
+def lambda_handler(event, context):
+    return asyncio.run(actual_async_logic(event, context))
