@@ -13,25 +13,27 @@ if __name__ == '__main__':
     )
 logger = logging.getLogger(__name__)
 
-import datetime
+import datetime # For timedelta and timezone
+from datetime import datetime as RealDatetimeClass # Alias for type checking
 from datetime import timedelta
 
-# Environment variables (placeholders - these will be set in Lambda)
+# Environment variables
 TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN')
 AUTHORIZED_USER_IDS = [int(user_id) for user_id in os.environ.get('AUTHORIZED_USER_IDS', '').split(',') if user_id]
 TARGET_CHANNEL_ID = os.environ.get('TARGET_CHANNEL_ID')
 KEYWORDS = ["#анонс", "#опрос"]
 
-MESSAGE_TEMPLATES = {
+# Templates for messages that link to forwarded polls
+POLL_LINK_MESSAGE_TEMPLATES = {
     "#анонс": "Проголосуй <a href=\"{link}\">здесь</a>, если придёшь (ну или хотя бы рассматриваешь такую возможность)",
     "#опрос": "<a href=\"{link}\">Проголосуй тут</a>"
 }
-# Identifiers to check if a message in the target channel already looks like one of our poll prompts.
-POLL_MESSAGE_IDENTIFIERS = [
-    "Проголосуй <a href=", # Corresponds to #анонс template
-    "<a href=", # Corresponds to #опрос template, broader match
+# Identifiers to check if a poll's caption (after forwarding) already contains a poll prompt
+# This helps decide whether to edit the caption or send a new message.
+POLL_CAPTION_IDENTIFIERS = [
+    "Проголосуй <a href=", # From #анонс template
+    "<a href=",             # From #опрос template (broader)
 ]
-
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Sends a welcome message when the /start command is issued."""
@@ -49,9 +51,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     if not message or not user:
         logger.warning("Received an update without a message or user.")
         return
-
-    # Log basic message info
-    # logger.info(f"Received message from user ID: {user.id}, username: {user.username}, text: {message.text}")
 
     log_details = {
         "update_id": update.update_id,
@@ -76,168 +75,167 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         }
     }
 
-    # Determine message type
     if message.text:
         log_details["message"]["type"] = "text"
     elif message.poll:
         log_details["message"]["type"] = "poll"
-    elif message.photo:
-        log_details["message"]["type"] = "photo"
-    elif message.video:
-        log_details["message"]["type"] = "video"
-    elif message.document:
-        log_details["message"]["type"] = "document"
-    elif message.audio:
-        log_details["message"]["type"] = "audio"
-    elif message.voice:
-        log_details["message"]["type"] = "voice"
-    elif message.sticker:
-        log_details["message"]["type"] = "sticker"
-    elif message.contact:
-        log_details["message"]["type"] = "contact"
-    elif message.location:
-        log_details["message"]["type"] = "location"
-    elif message.venue:
-        log_details["message"]["type"] = "venue"
+    # ... (other message types can be added here if needed for logging)
     else:
         log_details["message"]["type"] = "other/unknown"
-
     logger.info(f"Received message: {json.dumps(log_details, ensure_ascii=False, indent=2)}")
 
-    # Check if message is from an authorized user
     if user.id not in AUTHORIZED_USER_IDS:
         logger.warning(f"User {user.id} is not in AUTHORIZED_USER_IDS. Ignoring message.")
         return
     logger.info(f"User {user.id} is authorized.")
 
-    # Check if message is from an authorized user (already done at the top of the function)
-
-    # New logic for keyword-based poll announcements
-    found_keyword = None
-    if message.text:
-        for kw in KEYWORDS:
-            if kw.lower() in message.text.lower():
-                found_keyword = kw
-                break
-
-    if found_keyword:
-        logger.info(f"Keyword '{found_keyword}' found in text message (ID: {message.message_id}) from user {user.id}.")
+    # CASE 1: User sends a POLL OBJECT to the bot
+    if message.poll:
+        logger.info(f"Received a poll object from user {user.id}. Applying poll linking logic.")
         if not TARGET_CHANNEL_ID:
-            logger.error("TARGET_CHANNEL_ID is not set. Cannot process keyword message.")
-            await message.reply_text("Error: Target channel ID is not configured.")
+            logger.error("TARGET_CHANNEL_ID is not set. Cannot process poll.")
+            await message.reply_text("Error: Target channel ID is not configured for polls.")
             return
 
-        # Step 1: Forward the user's original message (which contains the keyword) to the target channel.
-        # This forwarded message in the target channel is what we will link to or edit.
+        # Step A: Forward the user's poll to the target channel
         try:
-            logger.info(f"Forwarding user's message (ID: {message.message_id} from chat {message.chat_id}) to target channel {TARGET_CHANNEL_ID} due to keyword '{found_keyword}'.")
-            forwarded_message = await context.bot.forward_message(
+            logger.info(f"Forwarding poll from user {user.id} (msg_id: {message.message_id}) to channel {TARGET_CHANNEL_ID}...")
+            forwarded_poll_message = await context.bot.forward_message(
                 chat_id=TARGET_CHANNEL_ID,
                 from_chat_id=message.chat_id,
                 message_id=message.message_id
             )
-            logger.info(f"Original message successfully forwarded to target channel. New message ID in target channel: {forwarded_message.message_id}")
+            logger.info(f"Poll successfully forwarded. New message ID in target channel: {forwarded_poll_message.message_id}")
         except Exception as e:
-            logger.error(f"Error forwarding original message for keyword '{found_keyword}' to channel {TARGET_CHANNEL_ID}: {e}", exc_info=True)
-            await message.reply_text(f"Sorry, there was an error forwarding your message: {e}")
+            logger.error(f"Error forwarding poll to channel {TARGET_CHANNEL_ID}: {e}", exc_info=True)
+            await message.reply_text(f"Sorry, there was an error forwarding your poll: {e}")
             return
 
-        # Step 2: Prepare the link to the forwarded message.
-        # Try to use channel username for cleaner links, otherwise use channel ID.
-        target_chat_for_link = TARGET_CHANNEL_ID # Fallback
+        # Step B: Age Check for the forwarded poll message
+        now = datetime.datetime.now(datetime.timezone.utc)
+        forwarded_date = forwarded_poll_message.date
+        if not isinstance(forwarded_date, RealDatetimeClass):
+            logger.warning(f"Forwarded poll (ID: {forwarded_poll_message.message_id}) has no valid date ({type(forwarded_date)}). Skipping age check and further processing for linking.")
+            return
+
+        if (now - forwarded_date) > timedelta(hours=1):
+            logger.info(f"Forwarded poll (ID: {forwarded_poll_message.message_id}) is older than 1 hour. No linking message will be added/edited.")
+            return
+
+        # Step C: Determine Poll Prompt Text (based on keywords in original poll's caption)
+        # Default to "#анонс" style if no specific keyword found in caption
+        chosen_keyword_for_template = "#анонс"
+        if message.text: # Poll caption is in message.text for python-telegram-bot
+            for kw in KEYWORDS: # Check #опрос first due to its specific template
+                if kw.lower() in message.text.lower():
+                    chosen_keyword_for_template = kw
+                    if kw == "#опрос": # #опрос is more specific for template choice here
+                        break
+            logger.info(f"Using template for keyword '{chosen_keyword_for_template}' based on poll caption.")
+        else:
+            logger.info(f"No caption in the original poll. Defaulting to '{chosen_keyword_for_template}' template.")
+
+        # Prepare link to the forwarded_poll_message
+        target_chat_for_link = TARGET_CHANNEL_ID
         try:
             chat_obj = await context.bot.get_chat(chat_id=TARGET_CHANNEL_ID)
             if chat_obj.username:
                 target_chat_for_link = chat_obj.username
             elif isinstance(TARGET_CHANNEL_ID, str) and TARGET_CHANNEL_ID.startswith("-100"):
-                 target_chat_for_link = TARGET_CHANNEL_ID[4:] # Strip "-100" for t.me/c/ format
-            elif isinstance(TARGET_CHANNEL_ID, int) and TARGET_CHANNEL_ID < -100000000000: # For supergroup IDs
-                 target_chat_for_link = str(TARGET_CHANNEL_ID)[4:]
+                target_chat_for_link = TARGET_CHANNEL_ID[4:]
+            elif isinstance(TARGET_CHANNEL_ID, int) and TARGET_CHANNEL_ID < -1000000000000: # check for typical supergroup/channel ID range
+                target_chat_for_link = str(TARGET_CHANNEL_ID)[4:]
         except Exception as e:
-            logger.warning(f"Could not fetch chat details for {TARGET_CHANNEL_ID} to optimize link format (using raw ID): {e}")
-            # Apply stripping logic even in fallback if applicable
+            logger.warning(f"Could not fetch chat details for {TARGET_CHANNEL_ID} to optimize link: {e}. Using raw ID for link.")
             if isinstance(TARGET_CHANNEL_ID, str) and TARGET_CHANNEL_ID.startswith("-100"):
-                 target_chat_for_link = TARGET_CHANNEL_ID[4:]
-            elif isinstance(TARGET_CHANNEL_ID, int) and TARGET_CHANNEL_ID < -100000000000:
+                target_chat_for_link = TARGET_CHANNEL_ID[4:]
+            elif isinstance(TARGET_CHANNEL_ID, int) and TARGET_CHANNEL_ID < -1000000000000:
                  target_chat_for_link = str(TARGET_CHANNEL_ID)[4:]
 
-        poll_message_link = f"https://t.me/{target_chat_for_link}/{forwarded_message.message_id}"
-        text_for_poll_prompt = MESSAGE_TEMPLATES[found_keyword].format(link=poll_message_link)
+        link_to_forwarded_poll = f"https://t.me/{target_chat_for_link}/{forwarded_poll_message.message_id}"
+        poll_prompt_text = POLL_LINK_MESSAGE_TEMPLATES[chosen_keyword_for_template].format(link=link_to_forwarded_poll)
 
-        # Step 3: Check age of the forwarded message in the target channel.
-        # Do nothing further if it's older than 1 hour.
-        now = datetime.datetime.now(datetime.timezone.utc)
-        message_date = forwarded_message.date
-        if not isinstance(message_date, datetime.datetime):
-            logger.warning(f"forwarded_message.date (ID: {forwarded_message.message_id}) is not a datetime object: {type(message_date)}. Cannot perform age check reliably.")
-        elif (now - message_date) > timedelta(hours=1):
-            logger.info(f"The forwarded message (ID: {forwarded_message.message_id} in target channel) is older than 1 hour. No poll prompt will be sent/edited.")
-            return
-
-        # Step 4: Determine if we need to edit the forwarded message or send a new one.
-        # This is based on whether the forwarded message's text *already* contains poll-like identifiers.
-        edit_forwarded_message_instead_of_sending_new = False
-        if forwarded_message.text:
-            for identifier in POLL_MESSAGE_IDENTIFIERS:
-                if identifier in forwarded_message.text:
-                    edit_forwarded_message_instead_of_sending_new = True
-                    logger.info(f"Forwarded message (ID: {forwarded_message.message_id}) text contains poll identifier ('{identifier}'). Will attempt to edit this message.")
+        # Step D: Check if forwarded poll's caption already contains a poll prompt
+        edit_caption_of_forwarded_poll = False
+        # The caption of the forwarded_poll_message is in its '.text' or '.caption' attribute
+        # For polls from users, PTB puts question into poll.question, options into poll.options
+        # If user sends /poll command, text is caption. If user forwards a poll, caption is kept.
+        # Let's check forwarded_poll_message.text (more common for bot-seen captions)
+        # and forwarded_poll_message.caption (more robust)
+        caption_to_check = forwarded_poll_message.text or forwarded_poll_message.caption
+        if caption_to_check:
+            for identifier in POLL_CAPTION_IDENTIFIERS:
+                if identifier in caption_to_check:
+                    edit_caption_of_forwarded_poll = True
+                    logger.info(f"Forwarded poll's caption (ID: {forwarded_poll_message.message_id}) contains identifier ('{identifier}'). Will attempt to edit this poll's caption.")
                     break
 
-        if edit_forwarded_message_instead_of_sending_new:
-            # Case 2.2: Edit the existing forwarded message in the target channel.
-            # The text_for_poll_prompt is already formatted with the correct link to the forwarded_message itself.
+        if edit_caption_of_forwarded_poll:
+            # Step D.1: Edit the caption of the forwarded poll
             try:
-                logger.info(f"Attempting to edit forwarded message ID {forwarded_message.message_id} in channel {TARGET_CHANNEL_ID}. New text: {text_for_poll_prompt}")
-                await context.bot.edit_message_text(
+                logger.info(f"Attempting to edit caption of forwarded poll ID {forwarded_poll_message.message_id} in {TARGET_CHANNEL_ID}. New caption: {poll_prompt_text}")
+                await context.bot.edit_message_caption(
                     chat_id=TARGET_CHANNEL_ID,
-                    message_id=forwarded_message.message_id,
-                    text=text_for_poll_prompt,
-                    parse_mode='HTML',
-                    disable_web_page_preview=True
+                    message_id=forwarded_poll_message.message_id,
+                    caption=poll_prompt_text,
+                    parse_mode='HTML'
                 )
-                logger.info(f"Successfully edited message {forwarded_message.message_id} in channel {TARGET_CHANNEL_ID}.")
+                logger.info(f"Successfully edited caption of poll {forwarded_poll_message.message_id}.")
             except Exception as e:
-                logger.error(f"Error editing message {forwarded_message.message_id} in channel {TARGET_CHANNEL_ID}: {e}", exc_info=True)
-                await message.reply_text(f"Forwarded your message, but could not edit it to update the poll link: {e}")
+                logger.error(f"Error editing poll caption for {forwarded_poll_message.message_id}: {e}", exc_info=True)
+                await message.reply_text(f"Forwarded your poll, but could not update its caption with the link: {e}")
         else:
-            # Case 2.1: Send a new message to the target channel, replying to the forwarded message.
+            # Step E: Send a new message linking to the forwarded poll
             try:
-                logger.info(f"Attempting to send new poll prompt to channel {TARGET_CHANNEL_ID}, replying to forwarded message {forwarded_message.message_id}. Text: {text_for_poll_prompt}")
+                logger.info(f"Attempting to send new message linking to poll {forwarded_poll_message.message_id} in {TARGET_CHANNEL_ID}. Text: {poll_prompt_text}")
                 await context.bot.send_message(
                     chat_id=TARGET_CHANNEL_ID,
-                    text=text_for_poll_prompt,
+                    text=poll_prompt_text,
                     parse_mode='HTML',
-                    reply_to_message_id=forwarded_message.message_id,
+                    reply_to_message_id=forwarded_poll_message.message_id,
                     disable_web_page_preview=True
                 )
-                logger.info(f"Successfully sent new poll prompt message to channel {TARGET_CHANNEL_ID}.")
+                logger.info(f"Successfully sent message linking to poll {forwarded_poll_message.message_id}.")
             except Exception as e:
-                logger.error(f"Error sending new poll prompt message to channel {TARGET_CHANNEL_ID}: {e}", exc_info=True)
-                await message.reply_text(f"Forwarded your message, but could not send the poll link message: {e}")
-        return
+                logger.error(f"Error sending message linking to poll {forwarded_poll_message.message_id}: {e}", exc_info=True)
+                await message.reply_text(f"Forwarded your poll, but could not send the linking message: {e}")
+        return # Processed poll
 
-    # Fallback: If not a keyword message, check if it's a direct poll object from an authorized user.
-    if message.poll:
-        logger.info(f"Received a direct poll object (no keyword detected in caption/text) from user {user.id}. Forwarding as is.")
-        if not TARGET_CHANNEL_ID:
-            logger.error("TARGET_CHANNEL_ID is not set. Cannot forward direct poll.")
-            await message.reply_text("Error: Target channel ID is not configured. Cannot repost poll.")
-            return
-        try:
-            await context.bot.forward_message(
-                chat_id=TARGET_CHANNEL_ID,
-                from_chat_id=message.chat_id,
-                message_id=message.message_id
-            )
-            logger.info(f"Direct poll from user {user.id} successfully forwarded to channel {TARGET_CHANNEL_ID}.")
-        except Exception as e:
-            logger.error(f"Error forwarding direct poll from user {user.id} to channel {TARGET_CHANNEL_ID}: {e}", exc_info=True)
-            await message.reply_text(f"Sorry, there was an error trying to repost the poll: {e}")
-        return
+    # CASE 2: User sends a TEXT MESSAGE with a keyword
+    # This is for standard announcements as per original behavior.
+    if message.text:
+        found_keyword_in_text = None
+        for kw in KEYWORDS:
+            if kw.lower() in message.text.lower():
+                found_keyword_in_text = kw
+                break
 
-    logger.info(f"No relevant keyword found and not a direct poll. Update ID {update.update_id} from user {user.id} ignored.")
+        if found_keyword_in_text:
+            logger.info(f"Keyword '{found_keyword_in_text}' found in text message from user {user.id}. Reposting text.")
+            if not TARGET_CHANNEL_ID:
+                logger.error("TARGET_CHANNEL_ID is not set. Cannot repost text announcement.")
+                await message.reply_text("Error: Target channel ID is not configured for text announcements.")
+                return
 
+            # Determine text to send (e.g., strip keyword or send full)
+            # For now, sending full text as per previous baseline.
+            text_to_repost = message.text
+            # Example: if you want to strip the keyword:
+            # text_to_repost = message.text.lower().replace(found_keyword_in_text.lower(), "").strip()
+
+            try:
+                logger.info(f"Attempting to send text announcement to channel {TARGET_CHANNEL_ID}...")
+                await context.bot.send_message(
+                    chat_id=TARGET_CHANNEL_ID,
+                    text=text_to_repost
+                )
+                logger.info(f"Text announcement successfully sent to channel {TARGET_CHANNEL_ID}.")
+            except Exception as e:
+                logger.error(f"Error sending text announcement to {TARGET_CHANNEL_ID}: {e}", exc_info=True)
+                await message.reply_text(f"Sorry, there was an error trying to post the announcement text: {e}")
+            return # Processed text keyword
+
+    logger.info(f"Message from user {user.id} is not a poll and does not contain a recognized keyword in text. Ignoring.")
 
 def main() -> None:
     """Starts the bot (for local testing - Lambda will use a different entry point)."""
@@ -250,17 +248,10 @@ def main() -> None:
         logger.warning("TARGET_CHANNEL_ID environment variable not set. Reposting will fail.")
 
     logger.info("Starting bot...")
-
-    # Create the Application and pass it your bot's token.
     application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
-
-    # Command handlers
     application.add_handler(CommandHandler("start", start))
-
-    # Message handlers
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-
-    # Run the bot until the user presses Ctrl-C
+    # Combined handler for text and polls, routing to handle_message
+    application.add_handler(MessageHandler(filters.TEXT | filters.POLL & ~filters.COMMAND, handle_message))
     logger.info("Bot polling started.")
     application.run_polling()
 
