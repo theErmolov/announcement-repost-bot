@@ -2,6 +2,7 @@ import json
 import asyncio # This was already present, kept as is.
 import os
 import logging
+import httpx # Make sure this is added
 from telegram import Update, Bot
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
@@ -23,13 +24,26 @@ async def initialize_bot():
             logger.error("TELEGRAM_BOT_TOKEN environment variable not set!")
             raise ValueError("TELEGRAM_BOT_TOKEN not configured")
 
-        logger.info("Initializing bot application for Lambda...")
-        bot = Bot(token=TELEGRAM_BOT_TOKEN)
-        application = Application.builder().bot(bot).build()
-        await application.initialize() # <-- ADDED THIS LINE
+        logger.info("Initializing bot application for Lambda with custom httpx timeouts...")
+
+        # Define custom httpx timeouts and client
+        timeout_config = httpx.Timeout(connect=15.0, read=15.0, write=15.0, pool=15.0)
+        custom_httpx_client = httpx.AsyncClient(timeout=timeout_config)
+
+        # Build application using token and custom httpx client
+        application = (
+            Application.builder()
+            .token(TELEGRAM_BOT_TOKEN)
+            .httpx_client(custom_httpx_client)
+            .build()
+        )
+
+        await application.initialize() # Existing line, ensure it's after build()
+
+        # Add handlers (existing lines)
         application.add_handler(CommandHandler("start", start))
         application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-        logger.info("Bot application initialized and handlers registered.")
+        logger.info("Bot application initialized and handlers registered with custom httpx client.")
     return application
 
 async def actual_async_logic(event, context): # Renamed from lambda_handler
