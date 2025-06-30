@@ -44,30 +44,52 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return
     logger.info(f"User {user.id} is authorized.")
 
-    # Check if the message text contains the keyword
-    if message.text and KEYWORD.lower() in message.text.lower():
-        logger.info(f"Keyword '{KEYWORD}' found in message from user {user.id}.")
+    # Check if the message is a poll from an authorized user
+    if message.poll:
+        logger.info(f"Received a poll from user {user.id}.")
         if not TARGET_CHANNEL_ID:
-            logger.error("TARGET_CHANNEL_ID is not set. Cannot repost.")
-            await message.reply_text("Error: Target channel ID is not configured. Cannot repost.")
+            logger.error("TARGET_CHANNEL_ID is not set. Cannot repost poll.")
+            await message.reply_text("Error: Target channel ID is not configured. Cannot repost poll.")
             return
-        logger.info(f"Target channel ID {TARGET_CHANNEL_ID} is configured.")
+        logger.info(f"Target channel ID {TARGET_CHANNEL_ID} is configured for poll repost.")
+        try:
+            logger.info(f"Attempting to forward poll from user {user.id} to channel {TARGET_CHANNEL_ID}...")
+            # Forward the poll as is
+            await context.bot.forward_message(
+                chat_id=TARGET_CHANNEL_ID,
+                from_chat_id=message.chat_id,
+                message_id=message.message_id
+            )
+            logger.info(f"Poll from user {user.id} successfully forwarded to channel {TARGET_CHANNEL_ID}.")
+            # await message.reply_text("Poll reposted!") # Optional confirmation
+        except Exception as e:
+            logger.error(f"Error forwarding poll from user {user.id} to channel {TARGET_CHANNEL_ID}: {e}", exc_info=True)
+            await message.reply_text(f"Sorry, there was an error trying to repost the poll: {e}")
+        return # Stop further processing if it's a poll from an authorized user
+
+    # Check if the message text contains the keyword for text announcements
+    if message.text and KEYWORD.lower() in message.text.lower():
+        logger.info(f"Keyword '{KEYWORD}' found in text message from user {user.id}.")
+        if not TARGET_CHANNEL_ID:
+            logger.error("TARGET_CHANNEL_ID is not set. Cannot repost text announcement.")
+            await message.reply_text("Error: Target channel ID is not configured. Cannot repost text announcement.")
+            return
+        logger.info(f"Target channel ID {TARGET_CHANNEL_ID} is configured for text announcement.")
 
         try:
-            logger.info(f"Attempting to send message text from user {user.id} to channel {TARGET_CHANNEL_ID}...")
+            logger.info(f"Attempting to send text announcement from user {user.id} to channel {TARGET_CHANNEL_ID}...")
             # Send the message text as a new message from the bot
             await context.bot.send_message(
                 chat_id=TARGET_CHANNEL_ID,
                 text=message.text  # Use the text from the original message
             )
-            logger.info(f"Message text from user {user.id} successfully sent to channel {TARGET_CHANNEL_ID}.")
-            # Optionally, send a confirmation to the user (can be noisy)
-            # await message.reply_text("Announcement text posted!")
+            logger.info(f"Text announcement from user {user.id} successfully sent to channel {TARGET_CHANNEL_ID}.")
+            # await message.reply_text("Announcement text posted!") # Optional confirmation
         except Exception as e:
-            logger.error(f"Error sending message text from user {user.id} to channel {TARGET_CHANNEL_ID}: {e}", exc_info=True)
+            logger.error(f"Error sending text announcement from user {user.id} to channel {TARGET_CHANNEL_ID}: {e}", exc_info=True)
             await message.reply_text(f"Sorry, there was an error trying to post the announcement text: {e}")
     else:
-        logger.info(f"Keyword '{KEYWORD}' not found in message from user {user.id} or message text is empty. Ignoring.")
+        logger.info(f"Neither a poll from authorized user nor keyword '{KEYWORD}' found in message from user {user.id}. Or message text is empty. Ignoring.")
 
 
 def main() -> None:
