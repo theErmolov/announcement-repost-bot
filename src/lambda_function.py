@@ -26,6 +26,7 @@ async def initialize_bot():
         logger.info("Initializing bot application for Lambda...")
         bot = Bot(token=TELEGRAM_BOT_TOKEN)
         application = Application.builder().bot(bot).build()
+        await application.initialize() # <-- ADDED THIS LINE
         application.add_handler(CommandHandler("start", start))
         application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
         logger.info("Bot application initialized and handlers registered.")
