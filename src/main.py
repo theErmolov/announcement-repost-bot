@@ -49,20 +49,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             return
 
         try:
-            # Forward the message
-            # Using forward_message preserves the original sender's name
-            # If you want the bot to send a new message, use context.bot.send_message
-            await context.bot.forward_message(
+            # Send the message text as a new message from the bot
+            await context.bot.send_message(
                 chat_id=TARGET_CHANNEL_ID,
-                from_chat_id=message.chat_id,
-                message_id=message.message_id
+                text=message.text  # Use the text from the original message
             )
-            logger.info(f"Message from user {user.id} forwarded to channel {TARGET_CHANNEL_ID}.")
+            logger.info(f"Message text from user {user.id} sent to channel {TARGET_CHANNEL_ID} as a new message.")
             # Optionally, send a confirmation to the user (can be noisy)
-            # await message.reply_text("Announcement reposted!")
+            # await message.reply_text("Announcement text posted!")
         except Exception as e:
-            logger.error(f"Error reposting message: {e}")
-            await message.reply_text(f"Sorry, there was an error trying to repost the announcement: {e}")
+            logger.error(f"Error sending message text: {e}")
+            await message.reply_text(f"Sorry, there was an error trying to post the announcement text: {e}")
     else:
         logger.info(f"Message from user {user.id} does not contain keyword or is empty. Ignoring.")
 
