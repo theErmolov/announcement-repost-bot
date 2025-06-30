@@ -1,5 +1,6 @@
 import os
 import logging
+import json
 from telegram import Update, Bot
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
@@ -36,7 +37,58 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return
 
     # Log basic message info
-    logger.info(f"Received message from user ID: {user.id}, username: {user.username}, text: {message.text}")
+    # logger.info(f"Received message from user ID: {user.id}, username: {user.username}, text: {message.text}")
+
+    log_details = {
+        "update_id": update.update_id,
+        "user": {
+            "id": user.id,
+            "username": user.username,
+            "first_name": user.first_name,
+            "last_name": user.last_name,
+            "full_name": user.full_name,
+            "is_bot": user.is_bot,
+        },
+        "message": {
+            "id": message.message_id,
+            "date": message.date.isoformat() if message.date else None,
+            "chat_id": message.chat_id,
+            "chat_type": message.chat.type if message.chat else None,
+            "chat_title": message.chat.title if message.chat and message.chat.title else None,
+            "text_summary": (message.text[:75] + '...' if message.text and len(message.text) > 75 else message.text) if message.text else None,
+            "is_poll": bool(message.poll),
+            "is_reply": bool(message.reply_to_message),
+            "is_forwarded": bool(message.forward_from or message.forward_from_chat),
+        }
+    }
+
+    # Determine message type
+    if message.text:
+        log_details["message"]["type"] = "text"
+    elif message.poll:
+        log_details["message"]["type"] = "poll"
+    elif message.photo:
+        log_details["message"]["type"] = "photo"
+    elif message.video:
+        log_details["message"]["type"] = "video"
+    elif message.document:
+        log_details["message"]["type"] = "document"
+    elif message.audio:
+        log_details["message"]["type"] = "audio"
+    elif message.voice:
+        log_details["message"]["type"] = "voice"
+    elif message.sticker:
+        log_details["message"]["type"] = "sticker"
+    elif message.contact:
+        log_details["message"]["type"] = "contact"
+    elif message.location:
+        log_details["message"]["type"] = "location"
+    elif message.venue:
+        log_details["message"]["type"] = "venue"
+    else:
+        log_details["message"]["type"] = "other/unknown"
+
+    logger.info(f"Received message: {json.dumps(log_details, ensure_ascii=False, indent=2)}")
 
     # Check if message is from an authorized user
     if user.id not in AUTHORIZED_USER_IDS:
