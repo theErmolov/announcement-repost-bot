@@ -29,13 +29,14 @@ async def initialize_bot():
         timeout_config = httpx.Timeout(connect=15.0, read=15.0, write=15.0, pool=15.0)
         custom_httpx_client = httpx.AsyncClient(timeout=timeout_config)
 
-        builder = Application.builder().token(TELEGRAM_BOT_TOKEN)
+        application = (
+            Application.builder()
+            .token(TELEGRAM_BOT_TOKEN)
+            .httpx_client(custom_httpx_client)
+            .build()
+        )
 
-        async def post_init_func(app: Application):
-            app.bot._client = custom_httpx_client
-
-        builder.post_init(post_init_func)
-        application = builder.build()
+        # No longer need post_init_func or builder.post_init(post_init_func)
 
         await application.initialize()
 
