@@ -1,19 +1,18 @@
 import json
-import asyncio # This was already present, kept as is.
+import asyncio
 import os
 import logging
-import httpx # Make sure this is added
-from telegram import Update, Bot
+import httpx
+from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
-from main import handle_message, start # Assuming these can be imported from main.py
+from main import handle_message, start
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN')
-# NEW: Webhook secret token for verifying requests from Telegram
-TELEGRAM_WEBHOOK_SECRET_TOKEN = os.environ.get('TELEGRAM_WEBHOOK_SECRET_TOKEN')
+TELEGRAM_WEBHOOK_SECRET_TOKEN = os.environ.get('TELEGRAM_WEBHOOK_SECRET_TOKEN') # For verifying Telegram requests
 
 application = None
 
@@ -24,42 +23,38 @@ async def initialize_bot():
             logger.error("TELEGRAM_BOT_TOKEN environment variable not set!")
             raise ValueError("TELEGRAM_BOT_TOKEN not configured")
 
-        logger.info("Initializing bot application for Lambda with custom httpx timeouts...")
+        logger.info("Initializing bot application with custom httpx timeouts...")
 
-        # Define custom httpx timeouts and client
         timeout_config = httpx.Timeout(connect=15.0, read=15.0, write=15.0, pool=15.0)
         custom_httpx_client = httpx.AsyncClient(timeout=timeout_config)
 
-        # Build application using token and custom httpx client
-        application = (
-            Application.builder()
-            .token(TELEGRAM_BOT_TOKEN)
-            .httpx_client(custom_httpx_client)
-            .build()
-        )
+        builder = Application.builder().token(TELEGRAM_BOT_TOKEN)
 
-        await application.initialize() # Existing line, ensure it's after build()
+        async def post_init_func(app: Application):
+            app.bot._client = custom_httpx_client
 
-        # Add handlers (existing lines)
+        builder.post_init(post_init_func)
+        application = builder.build()
+
+        await application.initialize()
+
         application.add_handler(CommandHandler("start", start))
         application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-        logger.info("Bot application initialized and handlers registered with custom httpx client.")
+        logger.info("Bot application initialized and handlers registered.")
     return application
 
-async def actual_async_logic(event, context): # Renamed from lambda_handler
+async def actual_async_logic(event, context):
     try:
         logger.info(f"Received event: {json.dumps(event)}")
 
-        # NEW: Verify the secret token from Telegram
         if TELEGRAM_WEBHOOK_SECRET_TOKEN:
             header_secret_token = event.get('headers', {}).get('X-Telegram-Bot-Api-Secret-Token')
             if header_secret_token != TELEGRAM_WEBHOOK_SECRET_TOKEN:
-                logger.warning("Invalid X-Telegram-Bot-Api-Secret-Token received.")
+                logger.warning("Invalid X-Telegram-Bot-Api-Secret-Token.")
                 return {'statusCode': 403, 'body': json.dumps({'message': 'Forbidden - Invalid secret token'})}
-            logger.info("X-Telegram-Bot-Api-Secret-Token verified successfully.")
+            logger.info("X-Telegram-Bot-Api-Secret-Token verified.")
         else:
-            # This case should ideally not happen in production if configured correctly
-            logger.warning("TELEGRAM_WEBHOOK_SECRET_TOKEN is not set in environment. Skipping header check (less secure).")
+            logger.warning("TELEGRAM_WEBHOOK_SECRET_TOKEN is not set. Skipping header check (less secure).")
 
 
         app = await initialize_bot()
