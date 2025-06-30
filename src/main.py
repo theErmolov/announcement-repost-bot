@@ -182,28 +182,69 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 break
 
         if found_keyword_in_text:
-            logger.info(f"Keyword '{found_keyword_in_text}' found in text message from user {user.id}. Reposting text.")
+            logger.info(f"Keyword '{found_keyword_in_text}' found in text message (ID: {message.message_id}) from user {user.id}.")
             if not TARGET_CHANNEL_ID:
-                logger.error("TARGET_CHANNEL_ID is not set. Cannot repost text announcement.")
+                logger.error("TARGET_CHANNEL_ID is not set. Cannot process text keyword message.")
                 await message.reply_text("Error: Target channel ID is not configured for text announcements.")
                 return
 
-            # Determine text to send (e.g., strip keyword or send full)
-            # For now, sending full text as per previous baseline.
-            text_to_repost = message.text
-            # Example: if you want to strip the keyword:
-            # text_to_repost = message.text.lower().replace(found_keyword_in_text.lower(), "").strip()
+            # Age Check for the original user's text message
+            now = datetime.datetime.now(datetime.timezone.utc)
+            original_text_date = message.date
+            if not isinstance(original_text_date, RealDatetimeClass):
+                logger.warning(f"Original text message (ID: {message.message_id}) has no valid date ({type(original_text_date)}). Cannot process.")
+                return
+            if (now - original_text_date) > timedelta(hours=1):
+                logger.info(f"Original text message (ID: {message.message_id}) is older than 1 hour. Skipping.")
+                return
+
+            text_to_repost = message.text # Using full text for now
 
             try:
-                logger.info(f"Attempting to send text announcement to channel {TARGET_CHANNEL_ID}...")
-                await context.bot.send_message(
+                logger.info(f"Attempting to send base text announcement to channel {TARGET_CHANNEL_ID}...")
+                bot_announcement_message = await context.bot.send_message(
                     chat_id=TARGET_CHANNEL_ID,
                     text=text_to_repost
                 )
-                logger.info(f"Text announcement successfully sent to channel {TARGET_CHANNEL_ID}.")
+                logger.info(f"Base text announcement successfully sent. Bot message ID: {bot_announcement_message.message_id}.")
+
+                # Now, prepare and send the "Проголосуй..." message as a reply
+                # Link to the bot_announcement_message
+                target_chat_for_link = TARGET_CHANNEL_ID
+                try:
+                    chat_obj = await context.bot.get_chat(chat_id=TARGET_CHANNEL_ID)
+                    if chat_obj.username:
+                        target_chat_for_link = chat_obj.username
+                    elif isinstance(TARGET_CHANNEL_ID, str) and TARGET_CHANNEL_ID.startswith("-100"):
+                        target_chat_for_link = TARGET_CHANNEL_ID[4:]
+                    elif isinstance(TARGET_CHANNEL_ID, int) and TARGET_CHANNEL_ID < -1000000000000:
+                        target_chat_for_link = str(TARGET_CHANNEL_ID)[4:]
+                except Exception as e:
+                    logger.warning(f"Could not fetch chat details for {TARGET_CHANNEL_ID} to optimize link for text announcement reply: {e}. Using raw ID.")
+                    if isinstance(TARGET_CHANNEL_ID, str) and TARGET_CHANNEL_ID.startswith("-100"):
+                        target_chat_for_link = TARGET_CHANNEL_ID[4:]
+                    elif isinstance(TARGET_CHANNEL_ID, int) and TARGET_CHANNEL_ID < -1000000000000:
+                        target_chat_for_link = str(TARGET_CHANNEL_ID)[4:]
+
+                link_to_bot_announcement = f"https://t.me/{target_chat_for_link}/{bot_announcement_message.message_id}"
+
+                # Determine prompt based on the original keyword found
+                prompt_text_template = POLL_LINK_MESSAGE_TEMPLATES.get(found_keyword_in_text, POLL_LINK_MESSAGE_TEMPLATES["#анонс"]) # Default to #анонс if somehow not found
+                reply_prompt_text = prompt_text_template.format(link=link_to_bot_announcement)
+
+                logger.info(f"Attempting to send poll prompt reply to {bot_announcement_message.message_id} in channel {TARGET_CHANNEL_ID}. Text: {reply_prompt_text}")
+                await context.bot.send_message(
+                    chat_id=TARGET_CHANNEL_ID,
+                    text=reply_prompt_text,
+                    parse_mode='HTML',
+                    reply_to_message_id=bot_announcement_message.message_id,
+                    disable_web_page_preview=True
+                )
+                logger.info(f"Successfully sent poll prompt reply for text announcement.")
+
             except Exception as e:
-                logger.error(f"Error sending text announcement to {TARGET_CHANNEL_ID}: {e}", exc_info=True)
-                await message.reply_text(f"Sorry, there was an error trying to post the announcement text: {e}")
+                logger.error(f"Error processing text announcement for keyword '{found_keyword_in_text}': {e}", exc_info=True)
+                await message.reply_text(f"Sorry, there was an error trying to post your announcement: {e}")
             return # Processed text keyword
 
     logger.info(f"Message from user {user.id} is not a poll and does not contain a recognized keyword in text. Ignoring.")
