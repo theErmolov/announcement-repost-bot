@@ -97,108 +97,79 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             await message.reply_text("Error: Target channel ID is not configured for polls.")
             return
 
-        # Step A: Forward the user's poll to the target channel
-        try:
-            logger.info(f"Forwarding poll from user {user.id} (msg_id: {message.message_id}) to channel {TARGET_CHANNEL_ID}...")
-            forwarded_poll_message = await context.bot.forward_message(
-                chat_id=TARGET_CHANNEL_ID,
-                from_chat_id=message.chat_id,
-                message_id=message.message_id
-            )
-            logger.info(f"Poll successfully forwarded. New message ID in target channel: {forwarded_poll_message.message_id}")
-        except Exception as e:
-            logger.error(f"Error forwarding poll to channel {TARGET_CHANNEL_ID}: {e}", exc_info=True)
-            await message.reply_text(f"Sorry, there was an error forwarding your poll: {e}")
-            return
+        # Polls are no longer forwarded. Bot posts a new message linking to the original user's poll.
 
-        # Step B: Age Check for the forwarded poll message
+        # Age Check for the original user's poll message
         now = datetime.datetime.now(datetime.timezone.utc)
-        forwarded_date = forwarded_poll_message.date
-        if not isinstance(forwarded_date, RealDatetimeClass):
-            logger.warning(f"Forwarded poll (ID: {forwarded_poll_message.message_id}) has no valid date ({type(forwarded_date)}). Skipping age check and further processing for linking.")
+        original_poll_date = message.date
+        if not isinstance(original_poll_date, RealDatetimeClass):
+            logger.warning(f"Original poll (ID: {message.message_id}, from chat: {message.chat_id}) has no valid date ({type(original_poll_date)}). Cannot process for linking.")
+            return
+        if (now - original_poll_date) > timedelta(hours=1):
+            logger.info(f"Original poll (ID: {message.message_id}, from chat: {message.chat_id}) is older than 1 hour. No linking message will be sent.")
             return
 
-        if (now - forwarded_date) > timedelta(hours=1):
-            logger.info(f"Forwarded poll (ID: {forwarded_poll_message.message_id}) is older than 1 hour. No linking message will be added/edited.")
-            return
-
-        # Step C: Determine Poll Prompt Text (based on keywords in original poll's caption)
-        # Default to "#анонс" style if no specific keyword found in caption
-        chosen_keyword_for_template = "#анонс"
-        if message.text: # Poll caption is in message.text for python-telegram-bot
-            for kw in KEYWORDS: # Check #опрос first due to its specific template
+        # Determine Poll Prompt Text (based on keywords in original poll's caption)
+        chosen_keyword_for_template = "#анонс" # Default
+        if message.text: # Poll caption is in message.text
+            for kw in KEYWORDS:
                 if kw.lower() in message.text.lower():
                     chosen_keyword_for_template = kw
-                    if kw == "#опрос": # #опрос is more specific for template choice here
+                    if kw == "#опрос": # Prioritize #опрос for its specific template
                         break
-            logger.info(f"Using template for keyword '{chosen_keyword_for_template}' based on poll caption.")
+            logger.info(f"Using template for keyword '{chosen_keyword_for_template}' based on poll caption: '{message.text[:50]}...'")
         else:
             logger.info(f"No caption in the original poll. Defaulting to '{chosen_keyword_for_template}' template.")
 
-        # Prepare link to the forwarded_poll_message
-        target_chat_for_link = TARGET_CHANNEL_ID
+        # Prepare link to the original user's poll message.
+        link_to_original_poll = ""
+        if message.chat.username: # Public group/channel with username
+            link_to_original_poll = f"https://t.me/{message.chat.username}/{message.message_id}"
+        elif str(message.chat_id).startswith("-100"): # Public supergroup/channel by ID
+            numeric_chat_id = str(message.chat_id)[4:]
+            link_to_original_poll = f"https://t.me/c/{numeric_chat_id}/{message.message_id}"
+        else: # Private chat with bot, or private group. Direct linking is not reliably public.
+              # The bot will inform the user if a public link cannot be made.
+            logger.warning(f"Cannot form a reliable public link for poll in chat {message.chat_id} (type: {message.chat.type}). This link may only work for the sender or bot.")
+            # For private chats (positive chat_id) or non-supergroups (negative but not -100xxxx)
+            # a universally accessible t.me/c/... link isn't possible.
+            # We can attempt a more general link for groups, but it's not guaranteed.
+            # A simple message.link could be used if available and appropriate, but it's often for the user who received it.
+            # Given the constraint, if a public link cannot be formed, we should notify the user.
+            if message.chat.type == "private":
+                 await message.reply_text("Sorry, I can't create a public link for polls from a private chat. Please send the poll in a group or channel where I am present.")
+                 return # Stop processing for this poll
+            else: # It's some other kind of group. Try to make a /c/ link if chat_id is negative.
+                if str(message.chat_id).startswith("-"):
+                    # This is a guess; non-supergroups might not work with /c/
+                    stripped_chat_id = str(message.chat_id).lstrip("-")
+                    link_to_original_poll = f"https://t.me/c/{stripped_chat_id}/{message.message_id}"
+                    logger.info(f"Attempting /c/ link for non-supergroup: {link_to_original_poll}")
+                else: # Should not happen for groups, but as a fallback.
+                    await message.reply_text("Sorry, I was unable to create a shareable link for your poll from this group.")
+                    return
+
+
+        if not link_to_original_poll: # Should be caught by earlier returns if link is impossible
+             logger.error(f"Failed to generate a link for poll message {message.message_id} in chat {message.chat_id}")
+             await message.reply_text("Sorry, I could not generate a link for your poll.")
+             return
+
+        poll_prompt_text = POLL_LINK_MESSAGE_TEMPLATES[chosen_keyword_for_template].format(link=link_to_original_poll)
+
+        # Always send a new message to TARGET_CHANNEL_ID
         try:
-            chat_obj = await context.bot.get_chat(chat_id=TARGET_CHANNEL_ID)
-            if chat_obj.username:
-                target_chat_for_link = chat_obj.username
-            elif isinstance(TARGET_CHANNEL_ID, str) and TARGET_CHANNEL_ID.startswith("-100"):
-                target_chat_for_link = TARGET_CHANNEL_ID[4:]
-            elif isinstance(TARGET_CHANNEL_ID, int) and TARGET_CHANNEL_ID < -1000000000000: # check for typical supergroup/channel ID range
-                target_chat_for_link = str(TARGET_CHANNEL_ID)[4:]
+            logger.info(f"Attempting to send new message to channel {TARGET_CHANNEL_ID} linking to original poll (User's msg_id: {message.message_id} in chat {message.chat_id}). Text: {poll_prompt_text}")
+            await context.bot.send_message(
+                chat_id=TARGET_CHANNEL_ID,
+                text=poll_prompt_text,
+                parse_mode='HTML',
+                disable_web_page_preview=True
+            )
+            logger.info(f"Successfully sent message to {TARGET_CHANNEL_ID} linking to original poll.")
         except Exception as e:
-            logger.warning(f"Could not fetch chat details for {TARGET_CHANNEL_ID} to optimize link: {e}. Using raw ID for link.")
-            if isinstance(TARGET_CHANNEL_ID, str) and TARGET_CHANNEL_ID.startswith("-100"):
-                target_chat_for_link = TARGET_CHANNEL_ID[4:]
-            elif isinstance(TARGET_CHANNEL_ID, int) and TARGET_CHANNEL_ID < -1000000000000:
-                 target_chat_for_link = str(TARGET_CHANNEL_ID)[4:]
-
-        link_to_forwarded_poll = f"https://t.me/{target_chat_for_link}/{forwarded_poll_message.message_id}"
-        poll_prompt_text = POLL_LINK_MESSAGE_TEMPLATES[chosen_keyword_for_template].format(link=link_to_forwarded_poll)
-
-        # Step D: Check if forwarded poll's caption already contains a poll prompt
-        edit_caption_of_forwarded_poll = False
-        # The caption of the forwarded_poll_message is in its '.text' or '.caption' attribute
-        # For polls from users, PTB puts question into poll.question, options into poll.options
-        # If user sends /poll command, text is caption. If user forwards a poll, caption is kept.
-        # Let's check forwarded_poll_message.text (more common for bot-seen captions)
-        # and forwarded_poll_message.caption (more robust)
-        caption_to_check = forwarded_poll_message.text or forwarded_poll_message.caption
-        if caption_to_check:
-            for identifier in POLL_CAPTION_IDENTIFIERS:
-                if identifier in caption_to_check:
-                    edit_caption_of_forwarded_poll = True
-                    logger.info(f"Forwarded poll's caption (ID: {forwarded_poll_message.message_id}) contains identifier ('{identifier}'). Will attempt to edit this poll's caption.")
-                    break
-
-        if edit_caption_of_forwarded_poll:
-            # Step D.1: Edit the caption of the forwarded poll
-            try:
-                logger.info(f"Attempting to edit caption of forwarded poll ID {forwarded_poll_message.message_id} in {TARGET_CHANNEL_ID}. New caption: {poll_prompt_text}")
-                await context.bot.edit_message_caption(
-                    chat_id=TARGET_CHANNEL_ID,
-                    message_id=forwarded_poll_message.message_id,
-                    caption=poll_prompt_text,
-                    parse_mode='HTML'
-                )
-                logger.info(f"Successfully edited caption of poll {forwarded_poll_message.message_id}.")
-            except Exception as e:
-                logger.error(f"Error editing poll caption for {forwarded_poll_message.message_id}: {e}", exc_info=True)
-                await message.reply_text(f"Forwarded your poll, but could not update its caption with the link: {e}")
-        else:
-            # Step E: Send a new message linking to the forwarded poll
-            try:
-                logger.info(f"Attempting to send new message linking to poll {forwarded_poll_message.message_id} in {TARGET_CHANNEL_ID}. Text: {poll_prompt_text}")
-                await context.bot.send_message(
-                    chat_id=TARGET_CHANNEL_ID,
-                    text=poll_prompt_text,
-                    parse_mode='HTML',
-                    reply_to_message_id=forwarded_poll_message.message_id,
-                    disable_web_page_preview=True
-                )
-                logger.info(f"Successfully sent message linking to poll {forwarded_poll_message.message_id}.")
-            except Exception as e:
-                logger.error(f"Error sending message linking to poll {forwarded_poll_message.message_id}: {e}", exc_info=True)
-                await message.reply_text(f"Forwarded your poll, but could not send the linking message: {e}")
+            logger.error(f"Error sending message linking to original poll to channel {TARGET_CHANNEL_ID}: {e}", exc_info=True)
+            await message.reply_text(f"Sorry, I could not send the linking message: {e}")
         return # Processed poll
 
     # CASE 2: User sends a TEXT MESSAGE with a keyword
