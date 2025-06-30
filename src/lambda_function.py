@@ -41,7 +41,9 @@ async def initialize_bot():
 
         application.add_handler(CommandHandler("start", start))
         application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-        logger.info("Bot application initialized and handlers registered.")
+        # Add a handler for polls
+        application.add_handler(MessageHandler(filters.POLL, handle_message))
+        logger.info("Bot application initialized and handlers registered for text and poll messages.")
     logger.info("Finished initialize_bot().")
     return application
 
