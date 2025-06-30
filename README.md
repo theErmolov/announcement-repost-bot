@@ -135,3 +135,9 @@ Your bot is now live!
 *   **Variables:** `AWS_REGION`, `SAM_CLI_S3_BUCKET`, `AUTHORIZED_USER_IDS`, and `TARGET_CHANNEL_ID` are configured as GitHub Repository/Organization Variables.
 *   **Webhook Verification:** The bot uses a `TELEGRAM_WEBHOOK_SECRET_TOKEN` for security.
 *   **IAM Permissions:** Follow the principle of least privilege.
+
+## Code Style and Comments
+
+- Avoid adding comments that merely restate what the code does. Focus on *why* a particular implementation detail was chosen if it's not obvious.
+- Verbose explanations of straightforward code sections should be avoided. Commit messages are a good place for detailed history of changes.
+- Keep comments concise and targeted at clarifying complexity or non-obvious logic.
