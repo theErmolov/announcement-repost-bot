@@ -37,6 +37,38 @@ def mock_update_fixture():
     update.message.poll = None
     update.message.message_id = 789
     update.message.chat_id = 54321
+    update.message.date = MagicMock() # Mock datetime object
+    update.message.date.isoformat.return_value = "2023-01-01T12:00:00" # Example ISO string
+
+    # Mock chat object and its attributes
+    update.message.chat = MagicMock()
+    update.message.chat.type = "private" # Default chat type
+    update.message.chat.title = None # Default no title for private chats
+
+    # Attributes for logging
+    update.effective_user.full_name = "Test User Full Name"
+    update.effective_user.is_bot = False
+    update.effective_user.first_name = "Test"
+    update.effective_user.last_name = "User"
+    update.effective_user.username = "testuser"
+
+
+    update.message.reply_to_message = None
+    update.message.forward_from = None
+    update.message.forward_from_chat = None
+
+    # Message content types, default to None
+    update.message.photo = None
+    update.message.video = None
+    update.message.document = None
+    update.message.audio = None
+    update.message.voice = None
+    update.message.sticker = None
+    update.message.contact = None
+    update.message.location = None
+    update.message.venue = None
+
+
     # Ensure reply_text is an AsyncMock if it's awaited
     update.message.reply_text = AsyncMock()
     return update
