@@ -18,6 +18,7 @@ application = None
 
 async def initialize_bot():
     global application
+    logger.info("Starting initialize_bot()...")
     if application is None:
         if not TELEGRAM_BOT_TOKEN:
             logger.error("TELEGRAM_BOT_TOKEN environment variable not set!")
@@ -41,6 +42,7 @@ async def initialize_bot():
         application.add_handler(CommandHandler("start", start))
         application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
         logger.info("Bot application initialized and handlers registered.")
+    logger.info("Finished initialize_bot().")
     return application
 
 async def actual_async_logic(event, context):
@@ -50,11 +52,11 @@ async def actual_async_logic(event, context):
         if TELEGRAM_WEBHOOK_SECRET_TOKEN:
             header_secret_token = event.get('headers', {}).get('X-Telegram-Bot-Api-Secret-Token')
             if header_secret_token != TELEGRAM_WEBHOOK_SECRET_TOKEN:
-                logger.warning("Invalid X-Telegram-Bot-Api-Secret-Token.")
+                logger.warning("Invalid X-Telegram-Bot-Api-Secret-Token. Request denied.")
                 return {'statusCode': 403, 'body': json.dumps({'message': 'Forbidden - Invalid secret token'})}
-            logger.info("X-Telegram-Bot-Api-Secret-Token verified.")
+            logger.info("X-Telegram-Bot-Api-Secret-Token successfully verified.")
         else:
-            logger.warning("TELEGRAM_WEBHOOK_SECRET_TOKEN is not set. Skipping header check (less secure).")
+            logger.info("TELEGRAM_WEBHOOK_SECRET_TOKEN is not set. Proceeding without webhook secret token verification (less secure).")
 
 
         app = await initialize_bot()
@@ -70,6 +72,7 @@ async def actual_async_logic(event, context):
             return {'statusCode': 400, 'body': json.dumps({'message': 'Invalid JSON format'})}
 
         update = Update.de_json(update_data, app.bot)
+        logger.info(f"Update object created successfully for update ID: {update.update_id}. Type: {update.effective_chat.type if update.effective_chat else 'N/A'}")
         logger.info(f"Processing update ID: {update.update_id}")
 
         await app.process_update(update)
