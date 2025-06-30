@@ -29,14 +29,13 @@ async def initialize_bot():
         timeout_config = httpx.Timeout(connect=15.0, read=15.0, write=15.0, pool=15.0)
         custom_httpx_client = httpx.AsyncClient(timeout=timeout_config)
 
-        application = (
-            Application.builder()
-            .token(TELEGRAM_BOT_TOKEN)
-            .httpx_client(custom_httpx_client)
-            .build()
-        )
+        builder = Application.builder().token(TELEGRAM_BOT_TOKEN)
 
-        # No longer need post_init_func or builder.post_init(post_init_func)
+        async def post_init_func(app: Application):
+            app.bot._client = custom_httpx_client
+
+        builder.post_init(post_init_func)
+        application = builder.build()
 
         await application.initialize()
 
@@ -47,6 +46,7 @@ async def initialize_bot():
     return application
 
 async def actual_async_logic(event, context):
+    global application # Ensure we can modify the global application variable
     try:
         logger.info(f"Received event: {json.dumps(event)}")
 
@@ -87,6 +87,18 @@ async def actual_async_logic(event, context):
     except Exception as e:
         logger.error(f"Error processing update: {e}", exc_info=True)
         return {'statusCode': 500, 'body': json.dumps({'message': f"Internal server error: {str(e)}"})}
+    finally:
+        if application and hasattr(application, 'bot') and hasattr(application.bot, '_client') and application.bot._client:
+            try:
+                logger.info("Attempting to close httpx client before Lambda execution ends.")
+                await application.bot._client.aclose()
+                logger.info("httpx client closed successfully.")
+            except Exception as e_close:
+                logger.error(f"Error trying to close httpx client: {e_close}", exc_info=True)
+
+        if application is not None: # Check if it was not already None
+            application = None
+            logger.info("Global application object set to None to force re-initialization on next invocation.")
 
 # New lambda_handler function
 def lambda_handler(event, context):
