@@ -20,11 +20,14 @@ KEYWORD = "#анонс"
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Sends a welcome message when the /start command is issued."""
+    user_id = update.effective_user.id
+    logger.info(f"Received /start command from user ID: {user_id}.")
     await update.message.reply_text('Hello! I am ready to monitor messages.')
-    logger.info(f"User {update.effective_user.id} started the bot.")
+    logger.info(f"Welcome message sent to user ID: {user_id}.")
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handles incoming messages, checks for keyword and authorized user, then reposts."""
+    logger.info(f"Entering handle_message for update ID: {update.update_id}")
     message = update.message
     user = update.effective_user
 
@@ -37,8 +40,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     # Check if message is from an authorized user
     if user.id not in AUTHORIZED_USER_IDS:
-        logger.info(f"Message from unauthorized user {user.id}. Ignoring.")
+        logger.warning(f"User {user.id} is not in AUTHORIZED_USER_IDS. Ignoring message.")
         return
+    logger.info(f"User {user.id} is authorized.")
 
     # Check if the message text contains the keyword
     if message.text and KEYWORD.lower() in message.text.lower():
@@ -47,21 +51,23 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             logger.error("TARGET_CHANNEL_ID is not set. Cannot repost.")
             await message.reply_text("Error: Target channel ID is not configured. Cannot repost.")
             return
+        logger.info(f"Target channel ID {TARGET_CHANNEL_ID} is configured.")
 
         try:
+            logger.info(f"Attempting to send message text from user {user.id} to channel {TARGET_CHANNEL_ID}...")
             # Send the message text as a new message from the bot
             await context.bot.send_message(
                 chat_id=TARGET_CHANNEL_ID,
                 text=message.text  # Use the text from the original message
             )
-            logger.info(f"Message text from user {user.id} sent to channel {TARGET_CHANNEL_ID} as a new message.")
+            logger.info(f"Message text from user {user.id} successfully sent to channel {TARGET_CHANNEL_ID}.")
             # Optionally, send a confirmation to the user (can be noisy)
             # await message.reply_text("Announcement text posted!")
         except Exception as e:
-            logger.error(f"Error sending message text: {e}")
+            logger.error(f"Error sending message text from user {user.id} to channel {TARGET_CHANNEL_ID}: {e}", exc_info=True)
             await message.reply_text(f"Sorry, there was an error trying to post the announcement text: {e}")
     else:
-        logger.info(f"Message from user {user.id} does not contain keyword or is empty. Ignoring.")
+        logger.info(f"Keyword '{KEYWORD}' not found in message from user {user.id} or message text is empty. Ignoring.")
 
 
 def main() -> None:
