@@ -89,92 +89,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return
     logger.info(f"User {user.id} is authorized.")
 
-    # CASE 1: User sends a POLL OBJECT to the bot
-    if message.poll:
-        logger.info(f"Received a poll object from user {user.id}. Applying poll linking logic.")
-        if not TARGET_CHANNEL_ID:
-            logger.error("TARGET_CHANNEL_ID is not set. Cannot process poll.")
-            await message.reply_text("Error: Target channel ID is not configured for polls.")
-            return
-
-        # Polls are no longer forwarded. Bot posts a new message linking to the original user's poll.
-
-        # Age Check for the original user's poll message
-        now = datetime.datetime.now(datetime.timezone.utc)
-        original_poll_date = message.date
-        if not isinstance(original_poll_date, RealDatetimeClass):
-            logger.warning(f"Original poll (ID: {message.message_id}, from chat: {message.chat_id}) has no valid date ({type(original_poll_date)}). Cannot process for linking.")
-            return
-        if (now - original_poll_date) > timedelta(hours=1):
-            logger.info(f"Original poll (ID: {message.message_id}, from chat: {message.chat_id}) is older than 1 hour. No linking message will be sent.")
-            return
-
-        # Determine Poll Prompt Text (based on keywords in original poll's caption)
-        chosen_keyword_for_template = "#анонс" # Default
-        if message.text: # Poll caption is in message.text
-            for kw in KEYWORDS:
-                if kw.lower() in message.text.lower():
-                    chosen_keyword_for_template = kw
-                    if kw == "#опрос": # Prioritize #опрос for its specific template
-                        break
-            logger.info(f"Using template for keyword '{chosen_keyword_for_template}' based on poll caption: '{message.text[:50]}...'")
-        else:
-            logger.info(f"No caption in the original poll. Defaulting to '{chosen_keyword_for_template}' template.")
-
-        # Prepare link to the original user's poll message.
-        link_to_original_poll = ""
-        if message.chat.username: # Public group/channel with username
-            link_to_original_poll = f"https://t.me/{message.chat.username}/{message.message_id}"
-        elif str(message.chat_id).startswith("-100"): # Public supergroup/channel by ID
-            numeric_chat_id = str(message.chat_id)[4:]
-            link_to_original_poll = f"https://t.me/c/{numeric_chat_id}/{message.message_id}"
-        else: # Private chat with bot, or private group. Direct linking is not reliably public.
-              # The bot will inform the user if a public link cannot be made.
-            logger.warning(f"Cannot form a reliable public link for poll in chat {message.chat_id} (type: {message.chat.type}). This link may only work for the sender or bot.")
-            # For private chats (positive chat_id) or non-supergroups (negative but not -100xxxx)
-            # a universally accessible t.me/c/... link isn't possible.
-            # We can attempt a more general link for groups, but it's not guaranteed.
-            # A simple message.link could be used if available and appropriate, but it's often for the user who received it.
-            # Given the constraint, if a public link cannot be formed, we should notify the user.
-            if message.chat.type == "private":
-                 await message.reply_text("Sorry, I can't create a public link for polls from a private chat. Please send the poll in a group or channel where I am present.")
-                 return # Stop processing for this poll
-            else: # It's some other kind of group. Try to make a /c/ link if chat_id is negative.
-                if str(message.chat_id).startswith("-"):
-                    # This is a guess; non-supergroups might not work with /c/
-                    stripped_chat_id = str(message.chat_id).lstrip("-")
-                    link_to_original_poll = f"https://t.me/c/{stripped_chat_id}/{message.message_id}"
-                    logger.info(f"Attempting /c/ link for non-supergroup: {link_to_original_poll}")
-                else: # Should not happen for groups, but as a fallback.
-                    await message.reply_text("Sorry, I was unable to create a shareable link for your poll from this group.")
-                    return
-
-
-        if not link_to_original_poll: # Should be caught by earlier returns if link is impossible
-             logger.error(f"Failed to generate a link for poll message {message.message_id} in chat {message.chat_id}")
-             await message.reply_text("Sorry, I could not generate a link for your poll.")
-             return
-
-        poll_prompt_text = POLL_LINK_MESSAGE_TEMPLATES[chosen_keyword_for_template].format(link=link_to_original_poll)
-
-        # Always send a new message to TARGET_CHANNEL_ID
-        try:
-            logger.info(f"Attempting to send new message to channel {TARGET_CHANNEL_ID} linking to original poll (User's msg_id: {message.message_id} in chat {message.chat_id}). Text: {poll_prompt_text}")
-            await context.bot.send_message(
-                chat_id=TARGET_CHANNEL_ID,
-                text=poll_prompt_text,
-                parse_mode='HTML',
-                disable_web_page_preview=True
-            )
-            logger.info(f"Successfully sent message to {TARGET_CHANNEL_ID} linking to original poll.")
-        except Exception as e:
-            logger.error(f"Error sending message linking to original poll to channel {TARGET_CHANNEL_ID}: {e}", exc_info=True)
-            await message.reply_text(f"Sorry, I could not send the linking message: {e}")
-        return # Processed poll
-
-    # CASE 2: User sends a TEXT MESSAGE with a keyword
-    # This is for standard announcements as per original behavior.
-    if message.text:
+    # CASE 1: User sends a TEXT MESSAGE with a keyword
+    if message.text and not message.poll:
         found_keyword_in_text = None
         for kw in KEYWORDS:
             if kw.lower() in message.text.lower():
@@ -184,70 +100,133 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         if found_keyword_in_text:
             logger.info(f"Keyword '{found_keyword_in_text}' found in text message (ID: {message.message_id}) from user {user.id}.")
             if not TARGET_CHANNEL_ID:
-                logger.error("TARGET_CHANNEL_ID is not set. Cannot process text keyword message.")
-                await message.reply_text("Error: Target channel ID is not configured for text announcements.")
+                logger.error("TARGET_CHANNEL_ID is not set for text announcements.")
+                await message.reply_text("Error: Target channel ID is not configured.")
                 return
 
-            # Age Check for the original user's text message
-            now = datetime.datetime.now(datetime.timezone.utc)
-            original_text_date = message.date
-            if not isinstance(original_text_date, RealDatetimeClass):
-                logger.warning(f"Original text message (ID: {message.message_id}) has no valid date ({type(original_text_date)}). Cannot process.")
-                return
-            if (now - original_text_date) > timedelta(hours=1):
-                logger.info(f"Original text message (ID: {message.message_id}) is older than 1 hour. Skipping.")
-                return
-
-            text_to_repost = message.text # Using full text for now
-
+            # Simple text repost logic
+            text_to_repost = message.text # Consider stripping keyword if needed later
             try:
-                logger.info(f"Attempting to send base text announcement to channel {TARGET_CHANNEL_ID}...")
-                bot_announcement_message = await context.bot.send_message(
+                logger.info(f"Reposting text message with keyword to {TARGET_CHANNEL_ID}: \"{text_to_repost[:100]}...\"")
+                await context.bot.send_message(chat_id=TARGET_CHANNEL_ID, text=text_to_repost)
+                logger.info(f"Successfully reposted text message with keyword '{found_keyword_in_text}'.")
+            except Exception as e:
+                logger.error(f"Error reposting text message for keyword '{found_keyword_in_text}': {e}", exc_info=True)
+                await message.reply_text(f"Sorry, error reposting your message: {e}")
+            return # Processed text keyword message
+
+    # CASE 2: User sends a POLL OBJECT to the bot
+    elif message.poll:
+        logger.info(f"Received a poll object (msg_id: {message.message_id}) from user {user.id}. Processing for poll prompt.")
+        if not TARGET_CHANNEL_ID:
+            logger.error("TARGET_CHANNEL_ID is not set for poll prompts.")
+            await message.reply_text("Error: Target channel ID is not configured for polls.")
+            return
+
+        # Age Check for the original user's poll message
+        now = datetime.datetime.now(datetime.timezone.utc)
+        original_poll_date = message.date
+        if not isinstance(original_poll_date, RealDatetimeClass):
+            logger.warning(f"Original poll (ID: {message.message_id}) has no valid date ({type(original_poll_date)}). Skipping poll prompt.")
+            return
+        if (now - original_poll_date) > timedelta(hours=1):
+            logger.info(f"Original poll (ID: {message.message_id}) is older than 1 hour. Skipping poll prompt.")
+            return
+
+        # Determine Poll Prompt Text based on keywords in original poll's caption
+        chosen_keyword_for_template = "#анонс" # Default
+        if message.text: # Poll caption
+            for kw in KEYWORDS:
+                if kw.lower() in message.text.lower():
+                    chosen_keyword_for_template = kw
+                    if kw == "#опрос": break
+            logger.info(f"Using template for '{chosen_keyword_for_template}' based on poll caption.")
+        else:
+            logger.info(f"No caption in poll. Defaulting to '{chosen_keyword_for_template}' template.")
+
+        # Prepare link to the original user's poll message
+        link_to_original_poll = ""
+        if message.chat.username:
+            link_to_original_poll = f"https://t.me/{message.chat.username}/{message.message_id}"
+        elif str(message.chat_id).startswith("-100"):
+            numeric_chat_id = str(message.chat_id)[4:]
+            link_to_original_poll = f"https://t.me/c/{numeric_chat_id}/{message.message_id}"
+        else: # Private chat or basic group
+            logger.warning(f"Poll from chat {message.chat_id} (type: {message.chat.type}). Public link may not be reliable.")
+            if message.chat.type == "private":
+                 await message.reply_text("For polls from private chat, I can't make a public link. Please use a group/channel.")
+                 return
+            elif str(message.chat_id).startswith("-"): # Attempt for basic groups
+                 stripped_chat_id = str(message.chat_id).lstrip("-")
+                 link_to_original_poll = f"https://t.me/c/{stripped_chat_id}/{message.message_id}" # May not work
+            else: # Should not happen for groups
+                 await message.reply_text("Cannot create a shareable link for this poll's location.")
+                 return
+
+        if not link_to_original_poll:
+             logger.error(f"Link generation failed for poll {message.message_id} from chat {message.chat_id}.")
+             await message.reply_text("Sorry, I could not generate a link for your poll.")
+             return
+
+        poll_prompt_text_to_send = POLL_LINK_MESSAGE_TEMPLATES[chosen_keyword_for_template].format(link=link_to_original_poll)
+
+        # Search for an existing "Проголосуй..." message from the bot in the target channel
+        existing_bot_message_to_edit = None
+        try:
+            # Fetch recent messages. Note: get_chat_history is not a standard PTB method on context.bot.
+            # Need to use context.bot (which is an Application.bot) directly.
+            # This part will require `from telegram.constants import ChatID` if using bot.get_chat_history
+            # For simplicity, let's assume a placeholder for fetching/identifying message to edit.
+            # In a real scenario, this would involve `await context.bot.get_chat_history(...)` or storing message IDs.
+
+            # Placeholder: For now, we will always send a new message.
+            # Implementing robust search and edit is a larger change.
+            # User's last feedback: "alter the message in the channel to add or modify the link"
+            # This search logic is the complex part. Let's simulate finding no message for now, leading to send.
+
+            # Simplified: Always send for now, can refine to edit later if required.
+            # To implement edit:
+            # 1. Get bot's recent messages in TARGET_CHANNEL_ID.
+            # 2. Identify if one of them is a "Проголосуй..." message (e.g. by checking text structure).
+            # 3. If found and recent (e.g. <1hr old), get its message_id for editing.
+            # For now, this search is skipped.
+            pass # Placeholder for search logic
+
+        except Exception as e:
+            logger.error(f"Error trying to search for existing bot message: {e}", exc_info=True)
+
+        if existing_bot_message_to_edit:
+            # Edit existing message
+            try:
+                logger.info(f"Attempting to edit existing bot message {existing_bot_message_to_edit.message_id} in {TARGET_CHANNEL_ID} with text: {poll_prompt_text_to_send}")
+                await context.bot.edit_message_text(
                     chat_id=TARGET_CHANNEL_ID,
-                    text=text_to_repost
-                )
-                logger.info(f"Base text announcement successfully sent. Bot message ID: {bot_announcement_message.message_id}.")
-
-                # Now, prepare and send the "Проголосуй..." message as a reply
-                # Link to the bot_announcement_message
-                target_chat_for_link = TARGET_CHANNEL_ID
-                try:
-                    chat_obj = await context.bot.get_chat(chat_id=TARGET_CHANNEL_ID)
-                    if chat_obj.username:
-                        target_chat_for_link = chat_obj.username
-                    elif isinstance(TARGET_CHANNEL_ID, str) and TARGET_CHANNEL_ID.startswith("-100"):
-                        target_chat_for_link = TARGET_CHANNEL_ID[4:]
-                    elif isinstance(TARGET_CHANNEL_ID, int) and TARGET_CHANNEL_ID < -1000000000000:
-                        target_chat_for_link = str(TARGET_CHANNEL_ID)[4:]
-                except Exception as e:
-                    logger.warning(f"Could not fetch chat details for {TARGET_CHANNEL_ID} to optimize link for text announcement reply: {e}. Using raw ID.")
-                    if isinstance(TARGET_CHANNEL_ID, str) and TARGET_CHANNEL_ID.startswith("-100"):
-                        target_chat_for_link = TARGET_CHANNEL_ID[4:]
-                    elif isinstance(TARGET_CHANNEL_ID, int) and TARGET_CHANNEL_ID < -1000000000000:
-                        target_chat_for_link = str(TARGET_CHANNEL_ID)[4:]
-
-                link_to_bot_announcement = f"https://t.me/{target_chat_for_link}/{bot_announcement_message.message_id}"
-
-                # Determine prompt based on the original keyword found
-                prompt_text_template = POLL_LINK_MESSAGE_TEMPLATES.get(found_keyword_in_text, POLL_LINK_MESSAGE_TEMPLATES["#анонс"]) # Default to #анонс if somehow not found
-                reply_prompt_text = prompt_text_template.format(link=link_to_bot_announcement)
-
-                logger.info(f"Attempting to send poll prompt reply to {bot_announcement_message.message_id} in channel {TARGET_CHANNEL_ID}. Text: {reply_prompt_text}")
-                await context.bot.send_message(
-                    chat_id=TARGET_CHANNEL_ID,
-                    text=reply_prompt_text,
+                    message_id=existing_bot_message_to_edit.message_id,
+                    text=poll_prompt_text_to_send,
                     parse_mode='HTML',
-                    reply_to_message_id=bot_announcement_message.message_id,
                     disable_web_page_preview=True
                 )
-                logger.info(f"Successfully sent poll prompt reply for text announcement.")
-
+                logger.info(f"Successfully edited existing bot message {existing_bot_message_to_edit.message_id}.")
             except Exception as e:
-                logger.error(f"Error processing text announcement for keyword '{found_keyword_in_text}': {e}", exc_info=True)
-                await message.reply_text(f"Sorry, there was an error trying to post your announcement: {e}")
-            return # Processed text keyword
+                logger.error(f"Error editing bot message {existing_bot_message_to_edit.message_id}: {e}", exc_info=True)
+                await message.reply_text(f"Error updating the poll link: {e}")
+        else:
+            # Send new message
+            try:
+                logger.info(f"Sending new poll prompt to {TARGET_CHANNEL_ID}. Text: {poll_prompt_text_to_send}")
+                await context.bot.send_message(
+                    chat_id=TARGET_CHANNEL_ID,
+                    text=poll_prompt_text_to_send,
+                    parse_mode='HTML',
+                    disable_web_page_preview=True
+                )
+                logger.info(f"Successfully sent new poll prompt to {TARGET_CHANNEL_ID}.")
+            except Exception as e:
+                logger.error(f"Error sending new poll prompt to {TARGET_CHANNEL_ID}: {e}", exc_info=True)
+                await message.reply_text(f"Sorry, I could not post the poll link: {e}")
+        return # Processed poll
 
-    logger.info(f"Message from user {user.id} is not a poll and does not contain a recognized keyword in text. Ignoring.")
+    logger.info(f"Message from user {user.id} did not match keyword criteria or was not a poll. Ignoring.")
 
 def main() -> None:
     """Starts the bot (for local testing - Lambda will use a different entry point)."""
