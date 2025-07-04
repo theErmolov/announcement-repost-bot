@@ -18,6 +18,7 @@ from datetime import datetime as RealDatetimeClass # Alias for type checking
 from datetime import timedelta
 import re # For potential string manipulation
 import json # For logging structured data
+from typing import Optional # Added for Python 3.9 compatibility
 
 # Environment variables
 TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN')
@@ -56,7 +57,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 # Note: The duplicate definitions of BOT_POLL_PROMPT_STARTS and LAST_ANNOUNCEMENT_KEY
 # that were here have been removed. Their primary definitions are at the top of the file.
 
-async def find_bot_last_message_in_channel(bot: Bot, channel_id: str, max_age_hours: int = 1, search_limit: int = 20) -> dict | None:
+async def find_bot_last_message_in_channel(bot: Bot, channel_id: str, max_age_hours: int = 1, search_limit: int = 20) -> Optional[dict]:
     """
     Tries to find the last message posted by the bot itself in the specified channel.
 
