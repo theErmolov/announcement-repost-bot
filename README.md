@@ -89,8 +89,26 @@ Navigate to your GitHub repository's `Settings` > `Secrets and variables` > `Act
 *   `AWS_IAM_ROLE_FOR_GITHUB_ACTIONS`: The ARN of the IAM Role that GitHub Actions will assume to deploy to AWS.
 *   `TELEGRAM_BOT_TOKEN`: Your Telegram bot token obtained from BotFather.
 *   `TELEGRAM_WEBHOOK_SECRET_TOKEN`: A strong, random string used to verify webhook requests.
+*   `ANNOUNCEMENT_TABLE_NAME`: The name of the DynamoDB table used to store temporary announcement details for poll linking (e.g., `TelegramBotAnnouncements`).
 
-### 5. IAM Role for GitHub Actions (OIDC)
+### 5. DynamoDB Table for Announcements
+
+For the poll linking feature to work reliably across Lambda invocations, a DynamoDB table is used to store details of the last announcement made by a user.
+
+*   **Create a DynamoDB Table:**
+    *   **Table Name:** Choose a name (e.g., `TelegramBotAnnouncements`) and set this name as the `ANNOUNCEMENT_TABLE_NAME` environment variable for your Lambda function (see GitHub Repository Variables).
+    *   **Primary Key:** `user_id` (Number).
+    *   **Attributes (Example):**
+        *   `user_id` (Number) - Partition Key
+        *   `message_id` (Number)
+        *   `chat_id` (String or Number)
+        *   `text_content` (String)
+        *   `timestamp` (Number) - Unix timestamp
+        *   `ttl` (Number, Optional) - Unix timestamp for DynamoDB TTL to auto-delete old items.
+    *   Ensure you configure on-demand or provisioned capacity as appropriate for your expected load.
+    *   **Enable Time To Live (TTL):** It's recommended to enable TTL on the `ttl` attribute for automatic cleanup of stale records.
+
+### 6. IAM Role for GitHub Actions (OIDC)
 
 Create an IAM role in your AWS account that GitHub Actions can assume.
 *   **Trusted entity type**: Select "Web identity".

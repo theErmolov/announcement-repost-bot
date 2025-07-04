@@ -18,6 +18,9 @@ Parameters:
     Type: String
     Description: "A secret token used to verify webhook requests from Telegram. Should be a long random string."
     NoEcho: true
+  AnnouncementTableName:
+    Type: String
+    Description: "Name of the DynamoDB table for storing announcement details (e.g., TelegramBotAnnouncements)"
 
 Globals:
   Function:
@@ -40,6 +43,10 @@ Resources:
           AUTHORIZED_USER_IDS: !Ref AuthorizedUserIds
           TARGET_CHANNEL_ID: !Ref TargetChannelId
           TELEGRAM_WEBHOOK_SECRET_TOKEN: !Ref TelegramWebhookSecretToken
+          ANNOUNCEMENT_TABLE_NAME: !Ref AnnouncementTableName
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref AnnouncementTableName
       Events:
         TelegramWebhook:
           Type: Api
