@@ -16,6 +16,8 @@ logger = logging.getLogger(__name__)
 import datetime # For timedelta and timezone
 from datetime import datetime as RealDatetimeClass # Alias for type checking
 from datetime import timedelta
+import re # For potential string manipulation
+import json # For logging structured data
 
 # Environment variables
 TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN')
@@ -30,10 +32,19 @@ POLL_LINK_MESSAGE_TEMPLATES = {
 }
 # Identifiers to check if a poll's caption (after forwarding) already contains a poll prompt
 # This helps decide whether to edit the caption or send a new message.
-POLL_CAPTION_IDENTIFIERS = [
-    "Проголосуй <a href=", # From #анонс template
-    "<a href=",             # From #опрос template (broader)
+POLL_CAPTION_IDENTIFIERS = [ # Not currently used, BOT_POLL_PROMPT_STARTS is used instead
+    "Проголосуй <a href=",
+    "<a href=",
 ]
+
+# Helper strings for identifying bot's own poll prompts
+BOT_POLL_PROMPT_STARTS = [
+    "Проголосуй <a href=",
+    "<a href=" # For the #опрос template specifically
+]
+
+# For simplicity with user_data, let's define a key
+LAST_ANNOUNCEMENT_KEY = 'last_announcement_details'
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Sends a welcome message when the /start command is issued."""
@@ -41,59 +52,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     logger.info(f"Received /start command from user ID: {user_id}.")
     await update.message.reply_text('Hello! I am ready to monitor messages.')
     logger.info(f"Welcome message sent to user ID: {user_id}.")
-
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handles incoming messages, checks for keyword and authorized user, then reposts."""
-    logger.info(f"Entering handle_message for update ID: {update.update_id}")
-    message = update.message
-    user = update.effective_user
-
-    if not message or not user:
-        logger.warning("Received an update without a message or user.")
-        return
-
-    log_details = {
-        "update_id": update.update_id,
-        "user": {
-            "id": user.id,
-            "username": user.username,
-            "first_name": user.first_name,
-            "last_name": user.last_name,
-            "full_name": user.full_name,
-            "is_bot": user.is_bot,
-        },
-        "message": {
-            "id": message.message_id,
-            "date": message.date.isoformat() if message.date else None,
-            "chat_id": message.chat_id,
-            "chat_type": message.chat.type if message.chat else None,
-            "chat_title": message.chat.title if message.chat and message.chat.title else None,
-            "text_summary": (message.text[:75] + '...' if message.text and len(message.text) > 75 else message.text) if message.text else None,
-            "is_poll": bool(message.poll),
-            "is_reply": bool(message.reply_to_message),
-            "is_forwarded": bool(message.forward_from or message.forward_from_chat),
-        }
-    }
-
-    if message.text:
-        log_details["message"]["type"] = "text"
-    elif message.poll:
-        log_details["message"]["type"] = "poll"
-    # ... (other message types can be added here if needed for logging)
-    else:
-        log_details["message"]["type"] = "other/unknown"
-    logger.info(f"Received message: {json.dumps(log_details, ensure_ascii=False, indent=2)}")
-
-    if user.id not in AUTHORIZED_USER_IDS:
-        logger.warning(f"User {user.id} is not in AUTHORIZED_USER_IDS. Ignoring message.")
-        return
-    logger.info(f"User {user.id} is authorized.")
-
-    logger.info(f"User {user.id} is authorized.")
-
-import re # For potential string manipulation
-
-# ... (other imports and initial code) ...
 
 # Helper strings for identifying bot's own poll prompts
 BOT_POLL_PROMPT_STARTS = [
