@@ -71,7 +71,48 @@ LAST_ANNOUNCEMENT_KEY = 'last_announcement_details'
 # ... (async def start is unchanged) ...
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    # ... (initial logging and user auth are unchanged) ...
+    logger.info(f"Entering handle_message for update ID: {update.update_id}")
+    message = update.message
+    user = update.effective_user
+
+    if not message or not user:
+        logger.warning("Received an update without a message or user.")
+        return
+
+    log_details = {
+        "update_id": update.update_id,
+        "user": {
+            "id": user.id,
+            "username": user.username,
+            "first_name": user.first_name,
+            "last_name": user.last_name,
+            "full_name": user.full_name,
+            "is_bot": user.is_bot,
+        },
+        "message": {
+            "id": message.message_id,
+            "date": message.date.isoformat() if message.date else None,
+            "chat_id": message.chat_id,
+            "chat_type": message.chat.type if message.chat else None,
+            "chat_title": message.chat.title if message.chat and message.chat.title else None,
+            "text_summary": (message.text[:75] + '...' if message.text and len(message.text) > 75 else message.text) if message.text else None,
+            "is_poll": bool(message.poll),
+            "is_reply": bool(message.reply_to_message),
+            "is_forwarded": bool(message.forward_from or message.forward_from_chat),
+        }
+    }
+
+    if message.text:
+        log_details["message"]["type"] = "text"
+    elif message.poll:
+        log_details["message"]["type"] = "poll"
+    else:
+        log_details["message"]["type"] = "other/unknown"
+    logger.info(f"Received message: {json.dumps(log_details, ensure_ascii=False, indent=2)}")
+
+    if user.id not in AUTHORIZED_USER_IDS:
+        logger.warning(f"User {user.id} is not in AUTHORIZED_USER_IDS. Ignoring message.")
+        return
     logger.info(f"User {user.id} is authorized.")
 
     # CASE 1: User sends a TEXT MESSAGE with a keyword (and it's not a poll)
