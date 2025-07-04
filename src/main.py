@@ -53,22 +53,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text('Hello! I am ready to monitor messages.')
     logger.info(f"Welcome message sent to user ID: {user_id}.")
 
-# Helper strings for identifying bot's own poll prompts
-BOT_POLL_PROMPT_STARTS = [
-    "Проголосуй <a href=",
-    "<a href=" # For the #опрос template specifically
-]
-# More specific identifiers for the start of the link part of templates
-# This helps in reliably finding and replacing only the bot's link prompt part
-# Example: "Проголосуй <a href=\"{link}\">здесь</a>" -> look for "\n\nПроголосуй <a href="
-# Example: "<a href=\"{link}\">Проголосуй тут</a>" -> look for "\n\n<a href="
-# We will simplify: if the message text contains any known prompt start, we replace the whole message.
-# A more robust way is to store the base announcement text separately from the poll prompt.
-
-# For simplicity with user_data, let's define a key
-LAST_ANNOUNCEMENT_KEY = 'last_announcement_details'
-
-# ... (async def start is unchanged) ...
+# Note: The duplicate definitions of BOT_POLL_PROMPT_STARTS and LAST_ANNOUNCEMENT_KEY
+# that were here have been removed. Their primary definitions are at the top of the file.
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     logger.info(f"Entering handle_message for update ID: {update.update_id}")
@@ -136,12 +122,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 posted_announcement = await context.bot.send_message(chat_id=TARGET_CHANNEL_ID, text=text_to_repost)
                 logger.info(f"Successfully posted text announcement with ID {posted_announcement.message_id}.")
                 # Store details of this announcement for potential poll attachment
-                context.user_data[LAST_ANNOUNCEMENT_KEY] = {
+                announcement_details_to_store = {
                     'message_id': posted_announcement.message_id,
                     'text_content': posted_announcement.text, # Store the actual text posted
                     'timestamp': datetime.datetime.now(datetime.timezone.utc)
                 }
-                logger.info(f"Stored announcement details for user {user.id}, message ID {posted_announcement.message_id}")
+                context.user_data[LAST_ANNOUNCEMENT_KEY] = announcement_details_to_store
+                logger.info(f"Stored announcement details in user_data for user {user.id}, key '{LAST_ANNOUNCEMENT_KEY}': {json.dumps(announcement_details_to_store, default=str)}")
             except Exception as e:
                 logger.error(f"Error posting text announcement for keyword '{found_keyword_in_text}': {e}", exc_info=True)
                 await message.reply_text(f"Sorry, error posting your announcement: {e}")
@@ -166,23 +153,27 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             return
 
         # Retrieve last announcement details from user_data
+        logger.info(f"Attempting to retrieve announcement details from context.user_data with key '{LAST_ANNOUNCEMENT_KEY}' for user {user.id}.")
+        logger.info(f"Current context.user_data for user {user.id}: {json.dumps(context.user_data, default=str)}")
         last_announcement = context.user_data.get(LAST_ANNOUNCEMENT_KEY)
 
         if not last_announcement:
-            logger.info(f"No last announcement found in user_data for user {user.id} to attach poll link to.")
+            logger.warning(f"No last announcement found in user_data for user {user.id} using key '{LAST_ANNOUNCEMENT_KEY}'. Cannot attach poll link.")
             # As per "shouldn't post a new message", we do nothing if no base message.
-            # Optionally, inform user: await message.reply_text("Please send a text announcement first to attach a poll to.")
             return
 
         # Check recency of the stored announcement (e.g., within last 10 minutes to be considered "active")
         # Also check if the announcement message itself in the channel is not too old (e.g. < 1 hour from its post time)
         # For simplicity, we'll use the timestamp of when we stored it.
         time_since_announcement_stored = now - last_announcement['timestamp']
+        logger.info(f"Time since last announcement was stored: {time_since_announcement_stored}. Stored at: {last_announcement['timestamp']}.")
         if time_since_announcement_stored > timedelta(minutes=10): # Configurable: how long is an announcement "active" for poll attachment?
-            logger.info(f"Last announcement (ID: {last_announcement['message_id']}) was stored more than 10 minutes ago. Not attaching poll link.")
+            logger.warning(f"Last announcement (ID: {last_announcement['message_id']}) stored at {last_announcement['timestamp']} is older than 10 minutes. Not attaching poll link.")
             # Also clear it so it's not used next time for an even older poll.
             context.user_data.pop(LAST_ANNOUNCEMENT_KEY, None)
+            logger.info(f"Popped '{LAST_ANNOUNCEMENT_KEY}' from user_data due to age.")
             return
+        logger.info("Last announcement is recent enough.")
 
         # Check if the actual announcement message in channel is too old (requires fetching it - complex)
         # For now, we rely on the recency of user_data storage. A more robust check would be needed
@@ -191,10 +182,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
         base_announcement_text = last_announcement.get('text_content', "")
         target_message_id_to_edit = last_announcement['message_id']
+        logger.info(f"Using base announcement text: \"{base_announcement_text[:100]}...\" from message ID {target_message_id_to_edit}.")
 
         # Determine Poll Prompt Text based on keywords in original poll's caption
         chosen_keyword_for_template = "#анонс" # Default
         if message.text: # Poll caption
+            logger.info(f"Poll has caption: \"{message.text[:100]}...\"")
             for kw in KEYWORDS:
                 if kw.lower() in message.text.lower():
                     chosen_keyword_for_template = kw
@@ -205,40 +198,48 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
         # Prepare link to the original user's poll message
         link_to_original_poll = ""
-        # (Link generation logic as before - ensuring it's robust)
         if message.chat.username:
             link_to_original_poll = f"https://t.me/{message.chat.username}/{message.message_id}"
         elif str(message.chat_id).startswith("-100"):
-            numeric_chat_id = str(message.chat_id)[4:]
+            numeric_chat_id = str(message.chat_id)[4:] # Strip -100 prefix
             link_to_original_poll = f"https://t.me/c/{numeric_chat_id}/{message.message_id}"
-        else:
-            logger.warning(f"Poll from chat {message.chat_id} (type: {message.chat.type}). Public link may not be reliable.")
+        else: # Attempt for other private/group chats if possible, log warning
+            logger.warning(f"Poll is from chat ID {message.chat_id} (type: {message.chat.type}), username: {message.chat.username}. Public link generation might be unreliable.")
             if message.chat.type == "private":
+                 logger.warning(f"Cannot create a public link for a poll from a private chat with user {user.id}.")
                  await message.reply_text("For polls from private chat, I can't make a public link. Please use a group/channel.")
                  context.user_data.pop(LAST_ANNOUNCEMENT_KEY, None) # Clear context as it can't be used
+                 logger.info(f"Popped '{LAST_ANNOUNCEMENT_KEY}' from user_data as poll link cannot be generated.")
                  return
-            elif str(message.chat_id).startswith("-"):
+            elif str(message.chat_id).startswith("-"): # Non-supergroup, e.g. -12345
                  stripped_chat_id = str(message.chat_id).lstrip("-")
                  link_to_original_poll = f"https://t.me/c/{stripped_chat_id}/{message.message_id}"
-                 logger.info(f"Attempting /c/ link for non-supergroup: {link_to_original_poll}")
-            else:
+                 logger.info(f"Attempting /c/ link for non-supergroup private chat: {link_to_original_poll}")
+            else: # Other cases, like bot's own chat if it's not a group/channel
+                 logger.error(f"Cannot determine a shareable link for poll from chat {message.chat_id} (type {message.chat.type}).")
                  await message.reply_text("Cannot create a shareable link for this poll's location.")
                  context.user_data.pop(LAST_ANNOUNCEMENT_KEY, None)
+                 logger.info(f"Popped '{LAST_ANNOUNCEMENT_KEY}' from user_data as poll link cannot be generated.")
                  return
 
-        if not link_to_original_poll:
-             logger.error(f"Link generation failed for poll {message.message_id} from chat {message.chat_id}.")
+        logger.info(f"Generated poll link: {link_to_original_poll}")
+
+        if not link_to_original_poll: # Should be caught by earlier returns, but as a safeguard
+             logger.error(f"Link generation failed unexpectedly for poll {message.message_id} from chat {message.chat_id}.")
              await message.reply_text("Sorry, I could not generate a link for your poll.")
              context.user_data.pop(LAST_ANNOUNCEMENT_KEY, None)
+             logger.info(f"Popped '{LAST_ANNOUNCEMENT_KEY}' from user_data due to link generation failure.")
              return
 
         new_poll_prompt_segment = POLL_LINK_MESSAGE_TEMPLATES[chosen_keyword_for_template].format(link=link_to_original_poll)
+        logger.info(f"New poll prompt segment: \"{new_poll_prompt_segment}\"")
 
         # Logic to remove old poll prompt and append new one
         text_to_edit = base_announcement_text
+        cleaned_text = base_announcement_text
         # Try to find if an old prompt exists and remove it.
         # This simple search might need to be more robust if text structure varies.
-        cleaned_text = base_announcement_text
+        logger.info(f"Original text for edit (before cleaning old prompt): \"{text_to_edit[:150]}...\"")
         for prompt_start_identifier in BOT_POLL_PROMPT_STARTS:
             if prompt_start_identifier in text_to_edit:
                 # Find the start of "\n\n" before the prompt start
@@ -249,36 +250,46 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 parts = text_to_edit.split("\n\n" + prompt_start_identifier)
                 if len(parts) > 1: # Found and successfully split
                     cleaned_text = parts[0] # Take text before the old prompt
-                    logger.info(f"Removed old poll prompt part starting with '{prompt_start_identifier}' from message {target_message_id_to_edit}.")
+                    logger.info(f"Removed old poll prompt part starting with '{prompt_start_identifier}' from message {target_message_id_to_edit}. Cleaned text: \"{cleaned_text[:100]}...\"")
                     break
                 # Fallback for #опрос template which might start directly with <a href=
                 elif text_to_edit.startswith(prompt_start_identifier) and chosen_keyword_for_template == "#опрос":
                     cleaned_text = "" # If the whole message was the #опрос prompt
-                    logger.info(f"Message {target_message_id_to_edit} seems to be an old #опрос prompt. Replacing.")
+                    logger.info(f"Message {target_message_id_to_edit} seems to be an old #опрос prompt. Replacing with new. Cleaned text is now empty.")
                     break
+
+        if cleaned_text == base_announcement_text:
+            logger.info("No existing poll prompt found to remove from base announcement text.")
 
 
         final_text = cleaned_text.strip() + "\n\n" + new_poll_prompt_segment
+        logger.info(f"Final text for edit: \"{final_text[:200]}...\"")
+
+        edit_params = {
+            "chat_id": TARGET_CHANNEL_ID,
+            "message_id": target_message_id_to_edit,
+            "text": final_text,
+            "parse_mode": 'HTML',
+            "disable_web_page_preview": True
+        }
+        logger.info(f"Attempting to edit message with params: {json.dumps(edit_params, default=str)}")
 
         try:
-            logger.info(f"Attempting to edit message {target_message_id_to_edit} in {TARGET_CHANNEL_ID}. New text: {final_text[:150]}...")
-            await context.bot.edit_message_text(
-                chat_id=TARGET_CHANNEL_ID,
-                message_id=target_message_id_to_edit,
-                text=final_text,
-                parse_mode='HTML',
-                disable_web_page_preview=True
-            )
-            logger.info(f"Successfully edited message {target_message_id_to_edit} with new poll prompt.")
+            await context.bot.edit_message_text(**edit_params)
+            logger.info(f"Successfully edited message {target_message_id_to_edit} in chat {TARGET_CHANNEL_ID} with new poll prompt.")
         except Exception as e:
-            logger.error(f"Error editing message {target_message_id_to_edit} in {TARGET_CHANNEL_ID}: {e}", exc_info=True)
+            logger.error(f"Error editing message {target_message_id_to_edit} in chat {TARGET_CHANNEL_ID}: {e}", exc_info=True)
             await message.reply_text(f"Sorry, I could not update the announcement with the poll link: {e}")
 
         # Clear the last announcement from context after using it
-        context.user_data.pop(LAST_ANNOUNCEMENT_KEY, None)
+        popped_value = context.user_data.pop(LAST_ANNOUNCEMENT_KEY, None)
+        if popped_value:
+            logger.info(f"Successfully popped '{LAST_ANNOUNCEMENT_KEY}' from user_data after processing poll.")
+        else:
+            logger.warning(f"Attempted to pop '{LAST_ANNOUNCEMENT_KEY}' from user_data, but it was not found (might have been popped earlier or was never there).")
         return
 
-    logger.info(f"Message from user {user.id} did not match keyword criteria or was not a poll. Ignoring.")
+    logger.info(f"Message from user {user.id} (update ID: {update.update_id}) did not match keyword criteria or was not a poll. No action taken.")
 
 def main() -> None:
     """Starts the bot (for local testing - Lambda will use a different entry point)."""
