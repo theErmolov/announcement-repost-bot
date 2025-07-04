@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN')
-TELEGRAM_WEBHOOK_SECRET_TOKEN = os.environ.get('TELEGRAM_WEBHOOK_SECRET_TOKEN') # For verifying Telegram requests
+TELEGRAM_WEBHOOK_SECRET_TOKEN = os.environ.get('TELEGRAM_WEBHOOK_SECRET_TOKEN')
 
 application = None
 
@@ -41,17 +41,15 @@ async def initialize_bot():
 
         application.add_handler(CommandHandler("start", start))
         application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-        # Add a handler for polls
         application.add_handler(MessageHandler(filters.POLL, handle_message))
         logger.info("Bot application initialized and handlers registered for text and poll messages.")
     logger.info("Finished initialize_bot().")
     return application
 
 async def actual_async_logic(event, context):
-    global application # Ensure we can modify the global application variable
+    global application
     logger.info(f"actual_async_logic started. AWS Request ID: {context.aws_request_id if context else 'N/A'}")
     try:
-        # Limiting event log size for brevity in CloudWatch, especially for large message bodies
         event_summary = {k: v for k, v in event.items() if k != 'body'}
         if 'body' in event and isinstance(event['body'], str) and len(event['body']) > 512:
             event_summary['body_summary'] = event['body'][:512] + "... (truncated)"
@@ -72,7 +70,7 @@ async def actual_async_logic(event, context):
         logger.info("Initializing bot application for this invocation...")
         app = await initialize_bot()
         logger.info(f"Bot application {'newly initialized' if app and not hasattr(app, '_already_initialized_marker') else 'reused or re-initialized'}. Proceeding with update processing.")
-        if app and not hasattr(app, '_already_initialized_marker'): # Mark it to understand re-initialization patterns
+        if app and not hasattr(app, '_already_initialized_marker'):
             app._already_initialized_marker = True
 
 
@@ -110,13 +108,11 @@ async def actual_async_logic(event, context):
             except Exception as e_close:
                 logger.error(f"Error trying to close httpx client: {e_close}", exc_info=True)
 
-        if application is not None: # Check if it was not already None
+        if application is not None:
             application = None
             logger.info("Global application object set to None to force re-initialization on next invocation.")
 
-# New lambda_handler function
 def lambda_handler(event, context):
-    # Basic log to confirm lambda_handler invocation before anything else
     aws_request_id = "N/A"
     if context and hasattr(context, 'aws_request_id'):
         aws_request_id = context.aws_request_id
