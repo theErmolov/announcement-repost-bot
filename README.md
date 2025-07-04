@@ -12,6 +12,34 @@ The bot is designed to be deployed as an AWS Lambda function (packaged as a ZIP 
 *   Automated build and deployment using GitHub Actions.
 *   Secure handling of secrets and webhook verification.
 
+## Bot Behavior
+
+The bot processes messages based on their content and type:
+
+1.  **Text Messages with Keywords:**
+    *   If an authorized user sends a text message (that is not a poll) containing a recognized keyword (e.g., `#анонс`, `#опрос`):
+        *   The bot will copy the full text of the user's message and post it as a new message to the configured `TARGET_CHANNEL_ID`.
+        *   Details of this announcement (message ID, text content, and timestamp) are temporarily stored associated with the user (using `context.user_data`). This is intended for a short-term memory to potentially link a subsequent poll.
+
+2.  **Poll Objects from Users:**
+    *   If an authorized user sends a poll object to the bot:
+        *   **Age Check:** The bot first checks if the user's original poll message is older than 1 hour. If so, it's ignored.
+        *   **Retrieve Last Announcement:** The bot attempts to retrieve the details of the last text announcement it posted (triggered by the same user) from its temporary memory (`context.user_data`).
+        *   **Conditions for Editing:**
+            *   If a last announcement is found and its stored timestamp is recent (e.g., within the last 10 minutes, configurable in code), the bot proceeds to edit that announcement.
+            *   If no recent announcement is found in memory for this user, the bot will currently do nothing further with the poll (as per the requirement not to post a new, unlinked poll prompt).
+        *   **Editing Process (if conditions met):**
+            *   A link to the user's current poll object is generated.
+            *   A "Проголосуй..." prompt string is chosen based on keywords (`#анонс` or `#опрос`) found in the caption of the user's current poll. It defaults to the `#анонс` style.
+            *   The bot takes the text of its previously posted announcement message.
+            *   It attempts to remove any older "Проголосуй..." string that might already be appended to that announcement.
+            *   The new "Проголосуй..." prompt (with the link to the current user's poll) is then appended to the announcement text.
+            *   The original announcement message in the `TARGET_CHANNEL_ID` is edited with this updated text.
+            *   The temporarily stored announcement details are then cleared.
+    *   **Note on `user_data` Persistence:** The reliability of remembering the "last announcement" in a stateless environment like AWS Lambda (without explicit persistence configured for `user_data`) means this editing feature for polls might only work if the poll message is processed by the same warm Lambda instance very shortly after the text announcement.
+
+3.  **Other Messages:** Messages from unauthorized users, or messages from authorized users that do not meet the above criteria (e.g., no keyword, not a poll when poll logic is active), are generally ignored.
+
 ## Architecture Overview
 
 1.  A user posts a message in the source Telegram chat.
