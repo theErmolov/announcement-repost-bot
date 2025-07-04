@@ -49,8 +49,16 @@ async def initialize_bot():
 
 async def actual_async_logic(event, context):
     global application # Ensure we can modify the global application variable
+    logger.info(f"actual_async_logic started. AWS Request ID: {context.aws_request_id if context else 'N/A'}")
     try:
-        logger.info(f"Received event: {json.dumps(event)}")
+        # Limiting event log size for brevity in CloudWatch, especially for large message bodies
+        event_summary = {k: v for k, v in event.items() if k != 'body'}
+        if 'body' in event and isinstance(event['body'], str) and len(event['body']) > 512:
+            event_summary['body_summary'] = event['body'][:512] + "... (truncated)"
+        else:
+            event_summary['body_summary'] = event.get('body')
+        logger.info(f"Received event summary: {json.dumps(event_summary)}")
+
 
         if TELEGRAM_WEBHOOK_SECRET_TOKEN:
             header_secret_token = event.get('headers', {}).get('X-Telegram-Bot-Api-Secret-Token')
@@ -61,8 +69,12 @@ async def actual_async_logic(event, context):
         else:
             logger.info("TELEGRAM_WEBHOOK_SECRET_TOKEN is not set. Proceeding without webhook secret token verification (less secure).")
 
-
+        logger.info("Initializing bot application for this invocation...")
         app = await initialize_bot()
+        logger.info(f"Bot application {'newly initialized' if app and not hasattr(app, '_already_initialized_marker') else 'reused or re-initialized'}. Proceeding with update processing.")
+        if app and not hasattr(app, '_already_initialized_marker'): # Mark it to understand re-initialization patterns
+            app._already_initialized_marker = True
+
 
         if 'body' not in event:
             logger.error("Event does not contain a 'body'.")
@@ -104,4 +116,9 @@ async def actual_async_logic(event, context):
 
 # New lambda_handler function
 def lambda_handler(event, context):
+    # Basic log to confirm lambda_handler invocation before anything else
+    aws_request_id = "N/A"
+    if context and hasattr(context, 'aws_request_id'):
+        aws_request_id = context.aws_request_id
+    logger.info(f"lambda_handler invoked. AWS Request ID: {aws_request_id}. Event keys: {list(event.keys()) if isinstance(event, dict) else 'Non-dict event'}")
     return asyncio.run(actual_async_logic(event, context))
