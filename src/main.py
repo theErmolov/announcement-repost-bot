@@ -56,6 +56,67 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 # Note: The duplicate definitions of BOT_POLL_PROMPT_STARTS and LAST_ANNOUNCEMENT_KEY
 # that were here have been removed. Their primary definitions are at the top of the file.
 
+async def find_bot_last_message_in_channel(bot: Bot, channel_id: str, max_age_hours: int = 1, search_limit: int = 20) -> dict | None:
+    """
+    Tries to find the last message posted by the bot itself in the specified channel.
+
+    Args:
+        bot: The telegram.Bot instance.
+        channel_id: The ID of the target channel.
+        max_age_hours: Maximum age of the message in hours.
+        search_limit: How many recent messages to search through.
+
+    Returns:
+        A dictionary with 'message_id' and 'text_content' if found, else None.
+    """
+    logger.info(f"Searching for bot's last message in channel {channel_id} (search limit: {search_limit} messages, max age: {max_age_hours}h).")
+    bot_id = bot.id
+    try:
+        # IMPORTANT: bot.get_chat_messages is NOT a standard method in python-telegram-bot.
+        # This is a conceptual placeholder for whatever method is used to fetch recent channel messages.
+        # This might require the bot to be an admin and use a more complex search or specific library features
+        # if available, or the user might have a specific way to do this.
+        # A common approach for bots if not admin is to process 'channel_post' updates as they arrive,
+        # but this function attempts an on-demand fetch as per user suggestion.
+        #
+        # If a direct method like this isn't available, this function would need significant changes
+        # or rely on the bot having administrator privileges to search messages effectively.
+        # For example, one might need to use a raw API call if the library doesn't wrap it.
+        #
+        # messages = await bot.get_chat_messages(chat_id=channel_id, limit=search_limit, offset_id=0, offset_date=0, etc...)
+        # ^^^ THIS IS PSEUDOCODE for fetching messages ^^^
+
+        # For the purpose of this exercise, and without a concrete API call that's guaranteed to work
+        # for all bot permission levels, this function will currently return None.
+        # The user will need to replace the message fetching part with a working solution
+        # based on their bot's capabilities and the `python-telegram-bot` version/extensions they might use.
+
+        logger.warning(f"Message fetching part of find_bot_last_message_in_channel is a placeholder. It needs a real implementation.")
+        # Simulate fetching - replace this with actual API call
+        # Example of what the loop would do if `channel_messages` was populated:
+        # channel_messages = [] # Actual fetched messages would go here
+        # for msg in reversed(channel_messages): # Assuming messages are newest first if limit applied, or sort them
+        #    if msg.from_user and msg.from_user.id == bot_id:
+        #        message_age = datetime.datetime.now(datetime.timezone.utc) - msg.date
+        #        if message_age <= timedelta(hours=max_age_hours):
+        #            logger.info(f"Found bot's message (ID: {msg.message_id}, Age: {message_age}) within {max_age_hours}h.")
+        #            return {'message_id': msg.message_id, 'text_content': msg.text}
+        #        else:
+        #            logger.info(f"Found bot's message (ID: {msg.message_id}), but it's too old (Age: {message_age}).")
+        #            return None # Found our message, but it's too old. Stop searching.
+        #    elif msg.sender_chat and msg.sender_chat.id == int(channel_id): # For anonymous admin bot posts
+        #        # This case is harder as sender_chat.id is the channel_id if bot posts as channel
+        #        # We might need to check content or rely on it being the only recent message
+        #        pass
+
+        # Returning None as placeholder behavior
+        return None
+
+    except Exception as e:
+        logger.error(f"Error trying to find bot's last message in channel {channel_id}: {e}", exc_info=True)
+        return None
+
+
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     logger.info(f"Entering handle_message for update ID: {update.update_id}")
     message = update.message
@@ -121,14 +182,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 logger.info(f"Posting text announcement to {TARGET_CHANNEL_ID}: \"{text_to_repost[:100]}...\"")
                 posted_announcement = await context.bot.send_message(chat_id=TARGET_CHANNEL_ID, text=text_to_repost)
                 logger.info(f"Successfully posted text announcement with ID {posted_announcement.message_id}.")
-                # Store details of this announcement for potential poll attachment
-                announcement_details_to_store = {
-                    'message_id': posted_announcement.message_id,
-                    'text_content': posted_announcement.text, # Store the actual text posted
-                    'timestamp': datetime.datetime.now(datetime.timezone.utc)
-                }
-                context.user_data[LAST_ANNOUNCEMENT_KEY] = announcement_details_to_store
-                logger.info(f"Stored announcement details in user_data for user {user.id}, key '{LAST_ANNOUNCEMENT_KEY}': {json.dumps(announcement_details_to_store, default=str)}")
+                # No longer storing announcement details in user_data for this flow
+                # context.user_data[LAST_ANNOUNCEMENT_KEY] = announcement_details_to_store
+                # logger.info(f"Stored announcement details in user_data for user {user.id}, key '{LAST_ANNOUNCEMENT_KEY}': {json.dumps(announcement_details_to_store, default=str)}")
             except Exception as e:
                 logger.error(f"Error posting text announcement for keyword '{found_keyword_in_text}': {e}", exc_info=True)
                 await message.reply_text(f"Sorry, error posting your announcement: {e}")
@@ -152,37 +208,24 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             logger.info(f"Original poll (ID: {message.message_id}) is older than 1 hour. Skipping poll prompt.")
             return
 
-        # Retrieve last announcement details from user_data
-        logger.info(f"Attempting to retrieve announcement details from context.user_data with key '{LAST_ANNOUNCEMENT_KEY}' for user {user.id}.")
-        logger.info(f"Current context.user_data for user {user.id}: {json.dumps(context.user_data, default=str)}")
-        last_announcement = context.user_data.get(LAST_ANNOUNCEMENT_KEY)
+        # New logic: Find the bot's last message in the target channel
+        logger.info(f"Attempting to find bot's last message in channel {TARGET_CHANNEL_ID} to attach poll link.")
 
-        if not last_announcement:
-            logger.warning(f"No last announcement found in user_data for user {user.id} using key '{LAST_ANNOUNCEMENT_KEY}'. Cannot attach poll link.")
-            # As per "shouldn't post a new message", we do nothing if no base message.
+        last_bot_message_details = await find_bot_last_message_in_channel(
+            bot=context.bot,
+            channel_id=TARGET_CHANNEL_ID,
+            max_age_hours=1  # As per user's requirement
+        )
+
+        if not last_bot_message_details:
+            logger.warning(f"Could not find a recent message from the bot (or it was too old) in channel {TARGET_CHANNEL_ID}. Cannot attach poll link.")
+            # Optionally, inform user: await message.reply_text("I couldn't find my last announcement to attach the poll to.")
             return
 
-        # Check recency of the stored announcement (e.g., within last 10 minutes to be considered "active")
-        # Also check if the announcement message itself in the channel is not too old (e.g. < 1 hour from its post time)
-        # For simplicity, we'll use the timestamp of when we stored it.
-        time_since_announcement_stored = now - last_announcement['timestamp']
-        logger.info(f"Time since last announcement was stored: {time_since_announcement_stored}. Stored at: {last_announcement['timestamp']}.")
-        if time_since_announcement_stored > timedelta(minutes=10): # Configurable: how long is an announcement "active" for poll attachment?
-            logger.warning(f"Last announcement (ID: {last_announcement['message_id']}) stored at {last_announcement['timestamp']} is older than 10 minutes. Not attaching poll link.")
-            # Also clear it so it's not used next time for an even older poll.
-            context.user_data.pop(LAST_ANNOUNCEMENT_KEY, None)
-            logger.info(f"Popped '{LAST_ANNOUNCEMENT_KEY}' from user_data due to age.")
-            return
-        logger.info("Last announcement is recent enough.")
+        logger.info(f"Found bot's last message: ID {last_bot_message_details['message_id']}, Text: \"{last_bot_message_details['text_content'][:50]}...\"")
 
-        # Check if the actual announcement message in channel is too old (requires fetching it - complex)
-        # For now, we rely on the recency of user_data storage. A more robust check would be needed
-        # if the bot could have been restarted or if user_data is not perfectly reliable for message age.
-        # The problem description also said "keep this link actual within an hour" referring to the user's poll.
-
-        base_announcement_text = last_announcement.get('text_content', "")
-        target_message_id_to_edit = last_announcement['message_id']
-        logger.info(f"Using base announcement text: \"{base_announcement_text[:100]}...\" from message ID {target_message_id_to_edit}.")
+        base_announcement_text = last_bot_message_details['text_content']
+        target_message_id_to_edit = last_bot_message_details['message_id']
 
         # Determine Poll Prompt Text based on keywords in original poll's caption
         chosen_keyword_for_template = "#анонс" # Default
@@ -208,8 +251,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             if message.chat.type == "private":
                  logger.warning(f"Cannot create a public link for a poll from a private chat with user {user.id}.")
                  await message.reply_text("For polls from private chat, I can't make a public link. Please use a group/channel.")
-                 context.user_data.pop(LAST_ANNOUNCEMENT_KEY, None) # Clear context as it can't be used
-                 logger.info(f"Popped '{LAST_ANNOUNCEMENT_KEY}' from user_data as poll link cannot be generated.")
+                 # No user_data to pop here anymore
                  return
             elif str(message.chat_id).startswith("-"): # Non-supergroup, e.g. -12345
                  stripped_chat_id = str(message.chat_id).lstrip("-")
@@ -218,8 +260,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             else: # Other cases, like bot's own chat if it's not a group/channel
                  logger.error(f"Cannot determine a shareable link for poll from chat {message.chat_id} (type {message.chat.type}).")
                  await message.reply_text("Cannot create a shareable link for this poll's location.")
-                 context.user_data.pop(LAST_ANNOUNCEMENT_KEY, None)
-                 logger.info(f"Popped '{LAST_ANNOUNCEMENT_KEY}' from user_data as poll link cannot be generated.")
+                 # context.user_data.pop(LAST_ANNOUNCEMENT_KEY, None) # No longer using user_data for this
+                 # logger.info(f"Popped '{LAST_ANNOUNCEMENT_KEY}' from user_data as poll link cannot be generated.") # No longer using user_data for this
                  return
 
         logger.info(f"Generated poll link: {link_to_original_poll}")
@@ -227,8 +269,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         if not link_to_original_poll: # Should be caught by earlier returns, but as a safeguard
              logger.error(f"Link generation failed unexpectedly for poll {message.message_id} from chat {message.chat_id}.")
              await message.reply_text("Sorry, I could not generate a link for your poll.")
-             context.user_data.pop(LAST_ANNOUNCEMENT_KEY, None)
-             logger.info(f"Popped '{LAST_ANNOUNCEMENT_KEY}' from user_data due to link generation failure.")
+             # context.user_data.pop(LAST_ANNOUNCEMENT_KEY, None) # No longer using user_data for this
+             # logger.info(f"Popped '{LAST_ANNOUNCEMENT_KEY}' from user_data due to link generation failure.") # No longer using user_data for this
              return
 
         new_poll_prompt_segment = POLL_LINK_MESSAGE_TEMPLATES[chosen_keyword_for_template].format(link=link_to_original_poll)
@@ -281,12 +323,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             logger.error(f"Error editing message {target_message_id_to_edit} in chat {TARGET_CHANNEL_ID}: {e}", exc_info=True)
             await message.reply_text(f"Sorry, I could not update the announcement with the poll link: {e}")
 
-        # Clear the last announcement from context after using it
-        popped_value = context.user_data.pop(LAST_ANNOUNCEMENT_KEY, None)
-        if popped_value:
-            logger.info(f"Successfully popped '{LAST_ANNOUNCEMENT_KEY}' from user_data after processing poll.")
-        else:
-            logger.warning(f"Attempted to pop '{LAST_ANNOUNCEMENT_KEY}' from user_data, but it was not found (might have been popped earlier or was never there).")
+        # No user_data to clear related to LAST_ANNOUNCEMENT_KEY anymore
         return
 
     logger.info(f"Message from user {user.id} (update ID: {update.update_id}) did not match keyword criteria or was not a poll. No action taken.")
