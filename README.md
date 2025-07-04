@@ -164,8 +164,20 @@ Your bot is now live!
 *   **Webhook Verification:** The bot uses a `TELEGRAM_WEBHOOK_SECRET_TOKEN` for security.
 *   **IAM Permissions:** Follow the principle of least privilege.
 
-## Code Style and Comments
+## Code Style and Documentation
 
-- Avoid adding comments that merely restate what the code does. Focus on *why* a particular implementation detail was chosen if it's not obvious.
-- Verbose explanations of straightforward code sections should be avoided. Commit messages are a good place for detailed history of changes.
-- Keep comments concise and targeted at clarifying complexity or non-obvious logic.
+The codebase aims for clarity and readability, minimizing inline comments that merely restate what the code does.
+- **Minimal Comments:** Comments are generally avoided unless they clarify non-obvious logic that cannot be made clear by the code itself.
+- **README for Complexity:** More complex behaviors, architectural decisions, or known limitations (such as placeholder functions) are documented in this README file.
+- **Commit Messages:** Detailed history of changes and the rationale behind them should be captured in commit messages.
+
+## Known Limitations and Important Notes
+
+*   **`find_bot_last_message_in_channel` Function (in `src/main.py`):**
+    *   The current implementation of `find_bot_last_message_in_channel` is a **placeholder**. It logs a warning and returns `None`.
+    *   This function is intended to find the last message posted by the bot in the target channel, which is crucial for the poll-linking feature (editing the bot's last announcement to add a poll link).
+    *   **Action Required:** To enable the poll-linking functionality as described, this function needs to be replaced with a working implementation that can fetch recent messages from the target channel. This might involve:
+        *   Using a specific method from the `python-telegram-bot` library if available and if the bot has sufficient permissions (e.g., admin rights in the channel).
+        *   Making direct Telegram Bot API calls if the library does not directly support the required message fetching capability.
+        *   Considering alternative strategies if direct fetching is not feasible (e.g., the bot remembering its own message IDs if it's guaranteed to be the only one posting or has a way to identify its messages).
+    *   The current behavior means that when a user sends a poll, the bot will likely log that it couldn't find its last message and will not proceed to link the poll to any previous announcement.
