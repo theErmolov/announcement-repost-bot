@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main # Or your default branch
+  workflow_dispatch: # Allows manual triggering
 
 permissions:
   id-token: write # Required for OIDC AWS authentication
