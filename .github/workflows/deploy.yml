@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main # Or your default branch
+  workflow_dispatch: {} # Allows manual triggering
 
 permissions:
   id-token: write # Required for OIDC AWS authentication
@@ -46,6 +47,7 @@ jobs:
               ParameterKey=AuthorizedUserIds,ParameterValue='${{ vars.AUTHORIZED_USER_IDS }}' \
               ParameterKey=TargetChannelId,ParameterValue='${{ vars.TARGET_CHANNEL_ID }}' \
               ParameterKey=TelegramWebhookSecretToken,ParameterValue='${{ secrets.TELEGRAM_WEBHOOK_SECRET_TOKEN }}' \
+              ParameterKey=AnnouncementTableName,ParameterValue='${{ vars.ANNOUNCEMENT_TABLE_NAME }}' \
             --stack-name telegram-bot-stack
         env:
           AWS_DEFAULT_REGION: ${{ vars.AWS_REGION }}
