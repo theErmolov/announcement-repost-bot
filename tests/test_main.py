@@ -86,3 +86,16 @@ async def test_handle_message_no_message_or_user(mock_context):
 
     await handle_message(no_user_update, mock_context)
     mock_context.bot.forward_message.assert_not_called()
+
+@pytest.mark.asyncio
+async def test_handle_message_from_forward_chat_id(mock_update, mock_context):
+    """
+    Tests that a message originating from the FORWARD_CHAT_ID is not forwarded.
+    """
+    # Set the message's chat_id to be the same as the FORWARD_CHAT_ID
+    mock_update.message.chat_id = int(FORWARD_CHAT_ID_VALUE)
+
+    await handle_message(mock_update, mock_context)
+
+    # Assert that forward_message was not called
+    mock_context.bot.forward_message.assert_not_called()
