@@ -33,6 +33,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         logger.error("FORWARD_CHAT_ID is not set. Cannot forward message.")
         return
 
+    if str(message.chat_id) == str(FORWARD_CHAT_ID):
+        logger.info(f"Message {message.message_id} from chat {message.chat_id} is from the forward chat. Not forwarding.")
+        return
+
     try:
         logger.info(f"Forwarding message {message.message_id} from user {user.id} to chat {FORWARD_CHAT_ID}.")
         await context.bot.forward_message(chat_id=FORWARD_CHAT_ID, from_chat_id=message.chat_id, message_id=message.message_id)
