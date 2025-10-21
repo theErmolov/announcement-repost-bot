@@ -8,12 +8,9 @@ Parameters:
     Type: String
     Description: "The Telegram Bot Token (obtain from BotFather)"
     NoEcho: true
-  AuthorizedUserIds:
+  ForwardChatId:
     Type: String
-    Description: "Comma-separated list of authorized Telegram User IDs"
-  TargetChannelId:
-    Type: String
-    Description: "The ID of the target Telegram channel for reposts (e.g., -100xxxxxxxxxx or @channelusername)"
+    Description: "The ID of the chat to forward messages to (e.g., -100xxxxxxxxxx or @channelusername)"
   TelegramWebhookSecretToken:
     Type: String
     Description: "A secret token used to verify webhook requests from Telegram. Should be a long random string."
@@ -37,8 +34,7 @@ Resources:
       Environment:
         Variables:
           TELEGRAM_BOT_TOKEN: !Ref TelegramBotToken
-          AUTHORIZED_USER_IDS: !Ref AuthorizedUserIds
-          TARGET_CHANNEL_ID: !Ref TargetChannelId
+          FORWARD_CHAT_ID: !Ref ForwardChatId
           TELEGRAM_WEBHOOK_SECRET_TOKEN: !Ref TelegramWebhookSecretToken
       Events:
         TelegramWebhook:
