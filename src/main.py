@@ -1,26 +1,11 @@
 import os
 import logging
 import json
-import boto3 # Added for DynamoDB
 from telegram import Update, Bot
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
-# DynamoDB setup
-DYNAMODB_TABLE_NAME = os.environ.get('ANNOUNCEMENT_TABLE_NAME')
-dynamodb_resource = None
-announcement_table = None
-
-if DYNAMODB_TABLE_NAME:
-    try:
-        dynamodb_resource = boto3.resource('dynamodb')
-        announcement_table = dynamodb_resource.Table(DYNAMODB_TABLE_NAME)
-    except Exception as e:
-        # Log error during initialization, but allow bot to start if table is not critical for all ops
-        # Or handle more gracefully depending on how critical DynamoDB is for startup
-        logging.getLogger(__name__).error(f"Failed to initialize DynamoDB table {DYNAMODB_TABLE_NAME}: {e}", exc_info=True)
-        # Depending on requirements, might want to raise an exception here or set a flag
-else:
-    logging.getLogger(__name__).warning("ANNOUNCEMENT_TABLE_NAME environment variable not set. DynamoDB features will be disabled.")
+# In-memory storage for announcement details
+user_announcement_details = {}
 
 
 if __name__ == '__main__':
@@ -66,38 +51,24 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 async def find_bot_last_message_in_channel(user_id: int, bot: Bot, channel_id_to_match: str, max_age_hours: int = 1) -> Optional[dict]:
     """
-    Finds the last announcement message details for a given user_id from DynamoDB.
+    Finds the last announcement message details for a given user_id from in-memory storage.
     Validates that the announcement was for the specified channel_id_to_match and within max_age_hours.
     """
-    logger.info(f"Attempting to find last announcement for user_id {user_id} from DynamoDB.")
+    logger.info(f"Attempting to find last announcement for user_id {user_id} from in-memory storage.")
 
-    if not announcement_table:
-        logger.warning("DynamoDB table not available. Cannot find last announcement.")
-        return None
-
-    try:
-        response = announcement_table.get_item(Key={'user_id': user_id})
-    except Exception as e:
-        logger.error(f"Error fetching announcement from DynamoDB for user {user_id}: {e}", exc_info=True)
-        return None
-
-    item = response.get('Item')
+    item = user_announcement_details.get(user_id)
     if not item:
-        logger.info(f"No announcement found in DynamoDB for user_id {user_id}.")
+        logger.info(f"No announcement found in memory for user_id {user_id}.")
         return None
 
-    # Validate if the announcement was for the expected channel
-    # Note: TARGET_CHANNEL_ID from env is usually a string. DynamoDB might store it as string or number.
-    # Ensure comparison is consistent or store TARGET_CHANNEL_ID in a consistent type.
-    # For now, assuming channel_id_to_match (from TARGET_CHANNEL_ID) is a string.
     stored_channel_id = str(item.get('chat_id'))
     if stored_channel_id != channel_id_to_match:
         logger.warning(f"Stored announcement for user {user_id} was for channel {stored_channel_id}, expected {channel_id_to_match}. Ignoring.")
         return None
 
     stored_timestamp = item.get('timestamp')
-    if not isinstance(stored_timestamp, (int, float)): # DynamoDB stores numbers
-        logger.error(f"Invalid timestamp format in DynamoDB for user_id {user_id}: {stored_timestamp}")
+    if not isinstance(stored_timestamp, (int, float)):
+        logger.error(f"Invalid timestamp format in memory for user_id {user_id}: {stored_timestamp}")
         return None
 
     current_time_unix = int(RealDatetimeClass.now(datetime.timezone.utc).timestamp())
@@ -106,19 +77,16 @@ async def find_bot_last_message_in_channel(user_id: int, bot: Bot, channel_id_to
 
     if age_seconds > max_age_seconds:
         logger.info(f"Last announcement for user {user_id} (timestamp: {stored_timestamp}) is older than {max_age_hours} hours. Current time: {current_time_unix}.")
-        # Optionally, consider deleting the stale record here if it wasn't cleared by TTL or successful poll linking
-        # try:
-        #     announcement_table.delete_item(Key={'user_id': user_id})
-        #     logger.info(f"Deleted stale announcement record for user {user_id} from DynamoDB.")
-        # except Exception as e_del:
-        #     logger.error(f"Error deleting stale announcement record for user {user_id}: {e_del}", exc_info=True)
+        # Clean up the stale record
+        user_announcement_details.pop(user_id, None)
+        logger.info(f"Deleted stale announcement record for user {user_id} from memory.")
         return None
 
-    logger.info(f"Found recent announcement for user {user_id} in DynamoDB: message_id {item.get('message_id')}")
+    logger.info(f"Found recent announcement for user {user_id} in memory: message_id {item.get('message_id')}")
     return {
-        'message_id': int(item.get('message_id')), # Ensure it's int
+        'message_id': int(item.get('message_id')),
         'text_content': item.get('text_content'),
-        'timestamp': stored_timestamp # Return the original stored timestamp
+        'timestamp': stored_timestamp
     }
 
 
@@ -187,28 +155,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 posted_announcement = await context.bot.send_message(chat_id=TARGET_CHANNEL_ID, text=text_to_repost)
                 logger.info(f"Successfully posted text announcement with ID {posted_announcement.message_id}.")
 
-                # Store announcement details in DynamoDB
-                if announcement_table:
-                    user_id = user.id
-                    current_timestamp = int(RealDatetimeClass.now(datetime.timezone.utc).timestamp())
-                    # TTL for 24 hours from now
-                    ttl_timestamp = current_timestamp + (24 * 60 * 60)
-
-                    announcement_item = {
-                        'user_id': user_id,
-                        'message_id': posted_announcement.message_id,
-                        'chat_id': TARGET_CHANNEL_ID, # Assuming TARGET_CHANNEL_ID is string, convert if necessary for consistency
-                        'text_content': text_to_repost,
-                        'timestamp': current_timestamp,
-                        'ttl': ttl_timestamp
-                    }
-                    try:
-                        announcement_table.put_item(Item=announcement_item)
-                        logger.info(f"Stored announcement details for user {user_id} in DynamoDB: message_id {posted_announcement.message_id}")
-                    except Exception as db_e:
-                        logger.error(f"Failed to store announcement details in DynamoDB for user {user_id}: {db_e}", exc_info=True)
-                else:
-                    logger.warning("DynamoDB table not available. Cannot store announcement details.")
+                # Store announcement details in memory
+                user_id = user.id
+                current_timestamp = int(RealDatetimeClass.now(datetime.timezone.utc).timestamp())
+                announcement_item = {
+                    'message_id': posted_announcement.message_id,
+                    'chat_id': TARGET_CHANNEL_ID,
+                    'text_content': text_to_repost,
+                    'timestamp': current_timestamp,
+                }
+                user_announcement_details[user_id] = announcement_item
+                logger.info(f"Stored announcement details for user {user_id} in memory: message_id {posted_announcement.message_id}")
 
             except Exception as e:
                 logger.error(f"Error posting text announcement for keyword '{found_keyword_in_text}': {e}", exc_info=True)
@@ -331,15 +288,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             await context.bot.edit_message_text(**edit_params)
             logger.info(f"Successfully edited message {target_message_id_to_edit} in chat {TARGET_CHANNEL_ID} with new poll prompt.")
 
-            # Clear the announcement details from DynamoDB after successful edit
-            if announcement_table:
-                try:
-                    announcement_table.delete_item(Key={'user_id': user.id})
-                    logger.info(f"Successfully deleted announcement details from DynamoDB for user {user.id}.")
-                except Exception as db_del_e:
-                    logger.error(f"Error deleting announcement details from DynamoDB for user {user.id}: {db_del_e}", exc_info=True)
-            else:
-                logger.warning("DynamoDB table not available. Cannot delete announcement details.")
+            # Clear the announcement details from memory after successful edit
+            if user.id in user_announcement_details:
+                del user_announcement_details[user.id]
+                logger.info(f"Successfully deleted announcement details from memory for user {user.id}.")
 
         except Exception as e:
             logger.error(f"Error editing message {target_message_id_to_edit} in chat {TARGET_CHANNEL_ID}: {e}", exc_info=True)
