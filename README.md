@@ -1,52 +1,23 @@
-# Telegram Announcer Bot for AWS Lambda (ZIP Deployment)
+# Telegram Forwarder Bot for AWS Lambda (ZIP Deployment)
 
-This project implements a Telegram bot that listens to messages in a group chat. When a message from an authorized user contains the hashtag "#анонс", the bot reposts that message to a specified Telegram channel.
+This project implements a simple Telegram bot that forwards all messages it receives to a designated chat.
 
 The bot is designed to be deployed as an AWS Lambda function (packaged as a ZIP archive) via AWS SAM (Serverless Application Model) and uses GitHub Actions for CI/CD.
 
 ## Features
 
-*   Reposts messages containing a specific keyword (`#анонс`) from authorized users.
-*   Forwards messages to a designated Telegram channel.
+*   Forwards all incoming messages to a specified Telegram chat.
 *   Serverless deployment on AWS Lambda using ZIP packaging.
 *   Automated build and deployment using GitHub Actions.
 *   Secure handling of secrets and webhook verification.
 
-## Bot Behavior
-
-The bot processes messages based on their content and type:
-
-1.  **Text Messages with Keywords:**
-    *   If an authorized user sends a text message (that is not a poll) containing a recognized keyword (e.g., `#анонс`, `#опрос`):
-        *   The bot will copy the full text of the user's message and post it as a new message to the configured `TARGET_CHANNEL_ID`.
-        *   Details of this announcement (message ID, text content, and timestamp) are temporarily stored in memory, associated with the user. This is intended for a short-term memory to potentially link a subsequent poll.
-
-2.  **Poll Objects from Users:**
-    *   If an authorized user sends a poll object to the bot:
-        *   **Age Check:** The bot first checks if the user's original poll message is older than 1 hour. If so, it's ignored.
-        *   **Retrieve Last Announcement:** The bot attempts to retrieve the details of the last text announcement it posted (triggered by the same user) from its in-memory storage.
-        *   **Conditions for Editing:**
-            *   If a last announcement is found and its stored timestamp is recent (e.g., within the last hour), the bot proceeds to edit that announcement.
-            *   If no recent announcement is found in memory for this user, the bot will do nothing further with the poll.
-        *   **Editing Process (if conditions met):**
-            *   A link to the user's current poll object is generated.
-            *   A "Проголосуй..." prompt string is chosen based on keywords (`#анонс` or `#опрос`) found in the caption of the user's current poll. It defaults to the `#анонс` style.
-            *   The bot takes the text of its previously posted announcement message.
-            *   It attempts to remove any older "Проголосуй..." string that might already be appended to that announcement.
-            *   The new "Проголосуй..." prompt (with the link to the current user's poll) is then appended to the announcement text.
-            *   The original announcement message in the `TARGET_CHANNEL_ID` is edited with this updated text.
-            *   The temporarily stored announcement details are then cleared from memory.
-    *   **Note on In-Memory Storage:** The reliability of remembering the "last announcement" in a stateless environment like AWS Lambda is not guaranteed. This editing feature for polls will only work if the poll message is processed by the same warm Lambda instance very shortly after the text announcement.
-
-3.  **Other Messages:** Messages from unauthorized users, or messages from authorized users that do not meet the above criteria, are generally ignored.
-
 ## Architecture Overview
 
-1.  A user posts a message in the source Telegram chat.
-2.  If the bot is added to the chat, Telegram sends an update to a configured webhook.
+1.  A user sends a message to the bot or a group where the bot is a member.
+2.  Telegram sends an update to a configured webhook.
 3.  The webhook URL points to an **AWS API Gateway** endpoint.
 4.  API Gateway triggers the **AWS Lambda function**.
-5.  The Lambda function (Python code in `src/`, packaged as a ZIP) processes the update.
+5.  The Lambda function (Python code in `src/`, packaged as a ZIP) processes the update and forwards the message.
 6.  **GitHub Actions** are used for CI/CD. Pushing to the `main` branch automatically builds the ZIP package, uploads it to an S3 bucket, and deploys the application using AWS SAM.
 
 ## Prerequisites
@@ -79,8 +50,7 @@ Navigate to your GitHub repository's `Settings` > `Secrets and variables` > `Act
 
 *   `AWS_REGION`: The AWS region where resources will be deployed (e.g., `us-east-1`).
 *   `SAM_CLI_S3_BUCKET`: The name of the S3 bucket you created in the previous step.
-*   `AUTHORIZED_USER_IDS`: A comma-separated list of Telegram user IDs who are authorized to trigger announcements (e.g., `123456789,987654321`).
-*   `TARGET_CHANNEL_ID`: The ID of the Telegram channel where announcements should be reposted (e.g., `-1001234567890` or `@channelusername`).
+*   `FORWARD_CHAT_ID`: The ID of the Telegram chat where messages should be forwarded (e.g., `-1001234567890` or `@channelusername`).
 
 ### 4. Configure GitHub Secrets
 
@@ -131,6 +101,6 @@ Your bot is now live!
 ## Security Notes
 
 *   **Secrets:** `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET_TOKEN`, and `AWS_IAM_ROLE_FOR_GITHUB_ACTIONS` must be kept as GitHub Secrets.
-*   **Variables:** `AWS_REGION`, `SAM_CLI_S3_BUCKET`, `AUTHORIZED_USER_IDS`, and `TARGET_CHANNEL_ID` are configured as GitHub Repository Variables.
+*   **Variables:** `AWS_REGION`, `SAM_CLI_S3_BUCKET`, and `FORWARD_CHAT_ID` are configured as GitHub Repository Variables.
 *   **Webhook Verification:** The bot uses a `TELEGRAM_WEBHOOK_SECRET_TOKEN` for security.
 *   **IAM Permissions:** Follow the principle of least privilege.
